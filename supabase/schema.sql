@@ -1,218 +1,407 @@
--- =============================================
--- MasukiBooks Full Database Schema
--- Run in Supabase SQL Editor
--- =============================================
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
 
--- 1. PROFILES TABLE
-CREATE TABLE IF NOT EXISTS profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  full_name TEXT NOT NULL DEFAULT '',
-  phone TEXT DEFAULT '',
-  role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
-  avatar_url TEXT DEFAULT '',
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+CREATE TABLE public.addresses (
+  address_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  full_name character varying NOT NULL,
+  profession character varying,
+  address_line1 character varying NOT NULL,
+  address_line2 character varying,
+  city character varying NOT NULL,
+  state character varying,
+  zip_code character varying NOT NULL,
+  country character varying NOT NULL,
+  phone_number character varying NOT NULL,
+  email character varying NOT NULL,
+  is_default boolean NOT NULL DEFAULT false,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT addresses_pkey PRIMARY KEY (address_id),
+  CONSTRAINT addresses_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
 );
-
--- 2. BOOKS TABLE
-CREATE TABLE IF NOT EXISTS books (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  title TEXT NOT NULL,
-  author TEXT NOT NULL,
-  category TEXT NOT NULL DEFAULT 'General',
-  price NUMERIC(10,2) NOT NULL DEFAULT 0,
-  description TEXT DEFAULT '',
-  cover_url TEXT DEFAULT '',
-  language TEXT DEFAULT 'English',
-  pages INTEGER DEFAULT 0,
-  isbn TEXT DEFAULT '',
-  publisher TEXT DEFAULT '',
-  stock INTEGER DEFAULT 999,
-  rating_avg NUMERIC(3,2) DEFAULT 0,
-  rating_count INTEGER DEFAULT 0,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+CREATE TABLE public.admin_users (
+  admin_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  email character varying NOT NULL UNIQUE,
+  password_hash character varying NOT NULL,
+  first_name character varying NOT NULL,
+  last_name character varying NOT NULL,
+  role character varying NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  last_login_at timestamp without time zone,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT admin_users_pkey PRIMARY KEY (admin_id)
 );
-
--- 3. CART TABLE
-CREATE TABLE IF NOT EXISTS cart_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-  quantity INTEGER NOT NULL DEFAULT 1,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(user_id, book_id)
+CREATE TABLE public.audit_logs (
+  log_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  actor_type character varying NOT NULL,
+  actor_id uuid,
+  action character varying NOT NULL,
+  entity_type character varying,
+  entity_id uuid,
+  old_values jsonb,
+  new_values jsonb,
+  ip_address character varying,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT audit_logs_pkey PRIMARY KEY (log_id)
 );
-
--- 4. ORDERS TABLE
-CREATE TABLE IF NOT EXISTS orders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded')),
-  total NUMERIC(10,2) NOT NULL DEFAULT 0,
-  currency TEXT DEFAULT 'INR',
-  shipping_name TEXT DEFAULT '',
-  shipping_address TEXT DEFAULT '',
-  shipping_city TEXT DEFAULT '',
-  shipping_zip TEXT DEFAULT '',
-  shipping_country TEXT DEFAULT 'India',
-  shipping_phone TEXT DEFAULT '',
-  payment_method TEXT DEFAULT '',
-  payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'failed', 'refunded')),
-  promo_code TEXT DEFAULT '',
-  discount NUMERIC(10,2) DEFAULT 0,
-  notes TEXT DEFAULT '',
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+CREATE TABLE public.bookmarks (
+  bookmark_id uuid NOT NULL,
+  color character varying,
+  created_at timestamp without time zone NOT NULL,
+  note text,
+  page_number integer NOT NULL,
+  title character varying,
+  updated_at timestamp without time zone NOT NULL,
+  product_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  CONSTRAINT bookmarks_pkey PRIMARY KEY (bookmark_id),
+  CONSTRAINT fkeaja9ximq7frh29a3yvhmim1b FOREIGN KEY (product_id) REFERENCES public.products(product_id),
+  CONSTRAINT fkdbsho2e05w5r13fkjqfjmge5f FOREIGN KEY (user_id) REFERENCES public.users(user_id)
 );
-
--- 5. ORDER ITEMS TABLE
-CREATE TABLE IF NOT EXISTS order_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  book_id UUID NOT NULL REFERENCES books(id) ON DELETE RESTRICT,
-  title TEXT NOT NULL,
-  author TEXT NOT NULL,
-  price NUMERIC(10,2) NOT NULL,
-  quantity INTEGER NOT NULL DEFAULT 1,
-  created_at TIMESTAMPTZ DEFAULT now()
+CREATE TABLE public.cart_items (
+  cart_item_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  cart_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  quantity integer NOT NULL DEFAULT 1,
+  unit_price numeric NOT NULL,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT cart_items_pkey PRIMARY KEY (cart_item_id),
+  CONSTRAINT cart_items_cart_id_fkey FOREIGN KEY (cart_id) REFERENCES public.carts(cart_id),
+  CONSTRAINT cart_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(product_id)
 );
-
--- 6. REVIEWS TABLE
-CREATE TABLE IF NOT EXISTS reviews (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
-  comment TEXT DEFAULT '',
-  is_approved BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(user_id, book_id)
+CREATE TABLE public.carts (
+  cart_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  guest_token character varying UNIQUE,
+  status character varying NOT NULL DEFAULT 'active'::character varying,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT carts_pkey PRIMARY KEY (cart_id),
+  CONSTRAINT carts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
 );
-
--- 7. WISHLIST TABLE
-CREATE TABLE IF NOT EXISTS wishlist (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(user_id, book_id)
+CREATE TABLE public.categories (
+  category_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  parent_category_id uuid,
+  name character varying NOT NULL,
+  slug character varying NOT NULL UNIQUE,
+  description text,
+  image_url character varying,
+  display_order integer NOT NULL DEFAULT 0,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT categories_pkey PRIMARY KEY (category_id),
+  CONSTRAINT categories_parent_category_id_fkey FOREIGN KEY (parent_category_id) REFERENCES public.categories(category_id)
 );
-
--- TRIGGERS: auto-update updated_at
-CREATE OR REPLACE FUNCTION update_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'profiles_updated_at') THEN
-    CREATE TRIGGER profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'books_updated_at') THEN
-    CREATE TRIGGER books_updated_at BEFORE UPDATE ON books FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'orders_updated_at') THEN
-    CREATE TRIGGER orders_updated_at BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'reviews_updated_at') THEN
-    CREATE TRIGGER reviews_updated_at BEFORE UPDATE ON reviews FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-  END IF;
-END;
-$$;
-
--- Auto-create profile on signup
-CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO profiles (id, full_name, role)
-  VALUES (
-    NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
-    COALESCE(NEW.raw_user_meta_data->>'role', 'user')
-  )
-  ON CONFLICT (id) DO NOTHING;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
-
--- RLS POLICIES
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE books ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cart_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE wishlist ENABLE ROW LEVEL SECURITY;
-
--- Helper
-CREATE OR REPLACE FUNCTION is_admin()
-RETURNS BOOLEAN AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
-  );
-$$ LANGUAGE sql SECURITY DEFINER;
-
--- Profiles policies
-CREATE POLICY "profiles_select" ON profiles FOR SELECT USING (auth.uid() = id OR is_admin());
-CREATE POLICY "profiles_update" ON profiles FOR UPDATE USING (auth.uid() = id OR is_admin());
-CREATE POLICY "profiles_insert" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
-
--- Books policies
-CREATE POLICY "books_select" ON books FOR SELECT USING (true);
-CREATE POLICY "books_insert" ON books FOR INSERT WITH CHECK (is_admin());
-CREATE POLICY "books_update" ON books FOR UPDATE USING (is_admin());
-CREATE POLICY "books_delete" ON books FOR DELETE USING (is_admin());
-
--- Cart policies
-CREATE POLICY "cart_select" ON cart_items FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "cart_insert" ON cart_items FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "cart_update" ON cart_items FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "cart_delete" ON cart_items FOR DELETE USING (auth.uid() = user_id);
-
--- Orders policies
-CREATE POLICY "orders_select" ON orders FOR SELECT USING (auth.uid() = user_id OR is_admin());
-CREATE POLICY "orders_insert" ON orders FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "orders_update" ON orders FOR UPDATE USING (is_admin());
-
--- Order items policies
-CREATE POLICY "order_items_select" ON order_items FOR SELECT
-  USING (EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND (orders.user_id = auth.uid() OR is_admin())));
-CREATE POLICY "order_items_insert" ON order_items FOR INSERT
-  WITH CHECK (EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid()));
-
--- Reviews policies
-CREATE POLICY "reviews_select" ON reviews FOR SELECT USING (is_approved = true OR auth.uid() = user_id OR is_admin());
-CREATE POLICY "reviews_insert" ON reviews FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "reviews_update" ON reviews FOR UPDATE USING (auth.uid() = user_id OR is_admin());
-CREATE POLICY "reviews_delete" ON reviews FOR DELETE USING (is_admin());
-
--- Wishlist policies
-CREATE POLICY "wishlist_select" ON wishlist FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "wishlist_insert" ON wishlist FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "wishlist_delete" ON wishlist FOR DELETE USING (auth.uid() = user_id);
-
--- SEED: Sample books
-INSERT INTO books (title, author, category, price, description, cover_url, language, pages) VALUES
-  ('Atomic Habits', 'James Clear', 'Self Growth', 499, 'An Easy & Proven Way to Build Good Habits & Break Bad Ones.', '', 'English', 320),
-  ('Deep Work', 'Cal Newport', 'Productivity', 459, 'Rules for Focused Success in a Distracted World.', '', 'English', 296),
-  ('Clean Code', 'Robert C. Martin', 'Technology', 599, 'A Handbook of Agile Software Craftsmanship.', '', 'English', 464),
-  ('The Psychology of Money', 'Morgan Housel', 'Finance', 399, 'Timeless lessons on wealth, greed, and happiness.', '', 'English', 256),
-  ('Thinking, Fast and Slow', 'Daniel Kahneman', 'Psychology', 549, 'An exploration of the two systems that drive the way we think.', '', 'English', 499),
-  ('Zero to One', 'Peter Thiel', 'Business', 349, 'Notes on startups, or how to build the future.', '', 'English', 224),
-  ('Sapiens', 'Yuval Noah Harari', 'History', 499, 'A Brief History of Humankind.', '', 'English', 498),
-  ('The Lean Startup', 'Eric Ries', 'Business', 449, 'How Today''s Entrepreneurs Use Continuous Innovation.', '', 'English', 336),
-  ('Educated', 'Tara Westover', 'Biography', 399, 'A Memoir about the power of education.', '', 'English', 352),
-  ('Dune', 'Frank Herbert', 'Fiction', 599, 'A masterpiece of science fiction set on a desert planet.', '', 'English', 688)
-ON CONFLICT DO NOTHING;
+CREATE TABLE public.discount_codes (
+  discount_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code character varying NOT NULL UNIQUE,
+  type character varying NOT NULL,
+  value numeric NOT NULL,
+  min_order_amount numeric NOT NULL DEFAULT 0,
+  max_uses integer,
+  used_count integer NOT NULL DEFAULT 0,
+  is_active boolean NOT NULL DEFAULT true,
+  starts_at timestamp without time zone,
+  expires_at timestamp without time zone,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT discount_codes_pkey PRIMARY KEY (discount_id)
+);
+CREATE TABLE public.download_tokens (
+  token_id uuid NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  expires_at timestamp without time zone NOT NULL,
+  ip_address character varying,
+  token character varying NOT NULL UNIQUE,
+  used boolean NOT NULL,
+  used_at timestamp without time zone,
+  product_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  CONSTRAINT download_tokens_pkey PRIMARY KEY (token_id),
+  CONSTRAINT fk7jw7ei3okpil89qg91d3dbhx8 FOREIGN KEY (product_id) REFERENCES public.products(product_id),
+  CONSTRAINT fkjohi5tfll4mhu5bm4hd8u7yhr FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.inventory (
+  inventory_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL UNIQUE,
+  quantity integer NOT NULL DEFAULT 0,
+  low_stock_threshold integer NOT NULL DEFAULT 10,
+  last_updated timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT inventory_pkey PRIMARY KEY (inventory_id),
+  CONSTRAINT inventory_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(product_id)
+);
+CREATE TABLE public.inventory_logs (
+  log_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL,
+  change_qty integer NOT NULL,
+  reason character varying NOT NULL,
+  reference_id uuid,
+  performed_by uuid,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT inventory_logs_pkey PRIMARY KEY (log_id),
+  CONSTRAINT inventory_logs_performed_by_fkey FOREIGN KEY (performed_by) REFERENCES public.admin_users(admin_id),
+  CONSTRAINT inventory_logs_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(product_id)
+);
+CREATE TABLE public.notifications (
+  notification_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  type character varying NOT NULL,
+  channel character varying NOT NULL,
+  recipient character varying NOT NULL,
+  subject character varying,
+  body text,
+  status character varying NOT NULL DEFAULT 'queued'::character varying,
+  sent_at timestamp without time zone,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT notifications_pkey PRIMARY KEY (notification_id),
+  CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.order_items (
+  order_item_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL,
+  product_id uuid,
+  product_title character varying NOT NULL,
+  quantity integer NOT NULL,
+  unit_price numeric NOT NULL,
+  total_price numeric NOT NULL,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT order_items_pkey PRIMARY KEY (order_item_id),
+  CONSTRAINT order_items_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(order_id),
+  CONSTRAINT order_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(product_id)
+);
+CREATE TABLE public.orders (
+  order_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  guest_email character varying,
+  order_number character varying NOT NULL UNIQUE,
+  status character varying NOT NULL DEFAULT 'pending'::character varying,
+  subtotal numeric NOT NULL,
+  discount_id uuid,
+  discount_amount numeric NOT NULL DEFAULT 0,
+  tax_amount numeric NOT NULL DEFAULT 0,
+  shipping_amount numeric NOT NULL DEFAULT 0,
+  total_amount numeric NOT NULL,
+  currency character varying NOT NULL DEFAULT 'USD'::character varying,
+  shipping_address_id uuid,
+  billing_address_id uuid,
+  notes text,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  order_type character varying,
+  CONSTRAINT orders_pkey PRIMARY KEY (order_id),
+  CONSTRAINT orders_billing_address_id_fkey FOREIGN KEY (billing_address_id) REFERENCES public.addresses(address_id),
+  CONSTRAINT orders_discount_id_fkey FOREIGN KEY (discount_id) REFERENCES public.discount_codes(discount_id),
+  CONSTRAINT orders_shipping_address_id_fkey FOREIGN KEY (shipping_address_id) REFERENCES public.addresses(address_id),
+  CONSTRAINT orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.otp_verifications (
+  otp_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  recipient character varying NOT NULL,
+  type character varying NOT NULL,
+  otp_hash character varying NOT NULL,
+  expires_at timestamp without time zone NOT NULL,
+  used_at timestamp without time zone,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT otp_verifications_pkey PRIMARY KEY (otp_id),
+  CONSTRAINT otp_verifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.payments (
+  payment_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL,
+  payment_method character varying NOT NULL,
+  gateway character varying NOT NULL,
+  gateway_transaction_id character varying,
+  gateway_payment_id character varying,
+  amount numeric NOT NULL,
+  currency character varying NOT NULL,
+  status character varying NOT NULL DEFAULT 'pending'::character varying,
+  failure_reason text,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT payments_pkey PRIMARY KEY (payment_id),
+  CONSTRAINT payments_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(order_id)
+);
+CREATE TABLE public.product_images (
+  image_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL,
+  url character varying NOT NULL,
+  alt_text character varying,
+  display_order integer NOT NULL DEFAULT 0,
+  is_primary boolean NOT NULL DEFAULT false,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT product_images_pkey PRIMARY KEY (image_id),
+  CONSTRAINT product_images_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(product_id)
+);
+CREATE TABLE public.product_ui_translations (
+  translation_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL,
+  language_code character varying NOT NULL,
+  title character varying,
+  description text,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT product_ui_translations_pkey PRIMARY KEY (translation_id),
+  CONSTRAINT product_ui_translations_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(product_id)
+);
+CREATE TABLE public.products (
+  product_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  category_id uuid NOT NULL,
+  sku character varying NOT NULL UNIQUE,
+  title character varying NOT NULL,
+  author character varying NOT NULL,
+  publisher character varying,
+  isbn character varying UNIQUE,
+  description text,
+  language character varying NOT NULL DEFAULT 'en'::character varying,
+  format character varying NOT NULL,
+  pages integer,
+  publication_date date,
+  price numeric NOT NULL,
+  compare_at_price numeric,
+  status character varying NOT NULL DEFAULT 'draft'::character varying,
+  created_by uuid,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  content_type character varying,
+  downloadable boolean,
+  file_format character varying,
+  file_key character varying,
+  file_size_bytes bigint,
+  max_downloads integer,
+  preview_pages integer,
+  total_pages integer,
+  CONSTRAINT products_pkey PRIMARY KEY (product_id),
+  CONSTRAINT products_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(category_id),
+  CONSTRAINT products_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.admin_users(admin_id)
+);
+CREATE TABLE public.reading_progress (
+  progress_id uuid NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  current_page integer,
+  last_read_at timestamp without time zone,
+  percentage numeric,
+  reading_time_seconds bigint,
+  total_pages integer,
+  updated_at timestamp without time zone NOT NULL,
+  product_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  CONSTRAINT reading_progress_pkey PRIMARY KEY (progress_id),
+  CONSTRAINT fk18kamohoarg4k4ke2gyjnjhpx FOREIGN KEY (product_id) REFERENCES public.products(product_id),
+  CONSTRAINT fkm29heqt0ff3ofdc6hfj2pquby FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.refunds (
+  refund_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  payment_id uuid NOT NULL,
+  order_id uuid NOT NULL,
+  amount numeric NOT NULL,
+  reason text,
+  status character varying NOT NULL DEFAULT 'requested'::character varying,
+  gateway_refund_id character varying,
+  processed_by uuid,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT refunds_pkey PRIMARY KEY (refund_id),
+  CONSTRAINT refunds_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(order_id),
+  CONSTRAINT refunds_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(payment_id),
+  CONSTRAINT refunds_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES public.admin_users(admin_id)
+);
+CREATE TABLE public.reviews (
+  review_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  order_id uuid NOT NULL,
+  rating smallint NOT NULL,
+  title character varying,
+  body text,
+  status character varying NOT NULL DEFAULT 'pending'::character varying,
+  moderated_by uuid,
+  moderated_at timestamp without time zone,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT reviews_pkey PRIMARY KEY (review_id),
+  CONSTRAINT reviews_moderated_by_fkey FOREIGN KEY (moderated_by) REFERENCES public.admin_users(admin_id),
+  CONSTRAINT reviews_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(order_id),
+  CONSTRAINT reviews_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(product_id),
+  CONSTRAINT reviews_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.shipments (
+  shipment_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL,
+  tracking_number character varying,
+  carrier character varying,
+  status character varying NOT NULL DEFAULT 'pending'::character varying,
+  estimated_delivery date,
+  delivered_at timestamp without time zone,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT shipments_pkey PRIMARY KEY (shipment_id),
+  CONSTRAINT shipments_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(order_id)
+);
+CREATE TABLE public.ui_translations (
+  translation_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  language_code character varying NOT NULL,
+  key character varying NOT NULL,
+  value text NOT NULL,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT ui_translations_pkey PRIMARY KEY (translation_id)
+);
+CREATE TABLE public.user_auth_providers (
+  auth_provider_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  provider character varying NOT NULL,
+  provider_user_id character varying NOT NULL,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_auth_providers_pkey PRIMARY KEY (auth_provider_id),
+  CONSTRAINT user_auth_providers_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.user_library (
+  user_library_id uuid NOT NULL,
+  access_type character varying NOT NULL,
+  acquired_at timestamp without time zone NOT NULL,
+  created_at timestamp without time zone NOT NULL,
+  expires_at timestamp without time zone,
+  status character varying NOT NULL,
+  updated_at timestamp without time zone NOT NULL,
+  order_id uuid,
+  product_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  CONSTRAINT user_library_pkey PRIMARY KEY (user_library_id),
+  CONSTRAINT fk1b2yp6pb3j74xhgw8njeg37jf FOREIGN KEY (order_id) REFERENCES public.orders(order_id),
+  CONSTRAINT fke6swjelwrqjgqmbe53bmqwnvi FOREIGN KEY (product_id) REFERENCES public.products(product_id),
+  CONSTRAINT fkssg4makcjh7i3v46n7qi1xr3h FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.user_sessions (
+  session_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  token_hash character varying NOT NULL,
+  ip_address character varying,
+  user_agent text,
+  expires_at timestamp without time zone NOT NULL,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_sessions_pkey PRIMARY KEY (session_id),
+  CONSTRAINT user_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id)
+);
+CREATE TABLE public.users (
+  user_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  email character varying UNIQUE,
+  phone_number character varying UNIQUE,
+  password_hash character varying,
+  first_name character varying NOT NULL,
+  last_name character varying NOT NULL,
+  profession character varying,
+  preferred_language character varying NOT NULL DEFAULT 'en'::character varying,
+  pii_consent boolean NOT NULL DEFAULT false,
+  pii_consent_date timestamp without time zone,
+  email_verified boolean NOT NULL DEFAULT false,
+  phone_verified boolean NOT NULL DEFAULT false,
+  status character varying NOT NULL DEFAULT 'active'::character varying,
+  created_at timestamp without time zone NOT NULL DEFAULT now(),
+  updated_at timestamp without time zone NOT NULL DEFAULT now(),
+  CONSTRAINT users_pkey PRIMARY KEY (user_id)
+);
