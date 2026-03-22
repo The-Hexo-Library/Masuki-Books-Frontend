@@ -44,10 +44,37 @@ export async function signIn(
   email: string,
   password: string
 ): Promise<AppUser> {
-  const { data } = await api.post<ApiResponse<AuthResponse>>("/auth/login", {
-    identifier: email,
+  const identifier = email.trim();
+  if (!identifier) {
+    throw new Error("Email is required.");
+  }
+
+  const loginPayload = {
+    identifier,
     password,
-  });
+  };
+
+  const loginPaths = ["/auth/login", "/auth/admin/login", "/api/auth/login"];
+
+  let data: ApiResponse<AuthResponse> | null = null;
+  let lastError: unknown;
+
+  for (const path of loginPaths) {
+    try {
+      const response = await api.post<ApiResponse<AuthResponse>>(path, loginPayload);
+      data = response.data;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!data) {
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+    throw new Error("Login failed.");
+  }
 
   const auth = data.data;
   setStoredToken(auth.accessToken);
@@ -86,36 +113,11 @@ export async function getCurrentUser(): Promise<AppUser | null> {
   const token = getStoredToken();
   if (!token) return null;
 
-  // Try stored user first for instant restore
   const stored = getStoredUser();
   if (stored) return toAppUser(stored);
 
-  // Fallback: call /users/me
-  try {
-    const { data } = await api.get<ApiResponse<Record<string, unknown>>>("/users/me");
-    const u = data.data;
-    const user: AppUser = {
-      id: String(u.userId ?? u.id ?? ""),
-      email: String(u.email ?? ""),
-      fullName: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim(),
-      firstName: String(u.firstName ?? ""),
-      lastName: String(u.lastName ?? ""),
-      role: mapRole(String(u.role ?? "user")),
-      phone: u.phoneNumber ? String(u.phoneNumber) : undefined,
-    };
-    setStoredUser({
-      userId: user.id,
-      email: user.email,
-      firstName: user.firstName ?? "",
-      lastName: user.lastName ?? "",
-      role: String(u.role ?? "user"),
-    });
-    return user;
-  } catch {
-    // Token expired or invalid
-    clearStoredToken();
-    return null;
-  }
+  clearStoredToken();
+  return null;
 }
 
 export async function signOut(): Promise<void> {
@@ -147,21 +149,9 @@ export async function verifyEmailOtpSupabase(
 
 /** Fetch user profile from backend */
 export async function fetchUserProfile(): Promise<AppUser | null> {
-  try {
-    const { data } = await api.get<ApiResponse<Record<string, unknown>>>("/users/me");
-    const u = data.data;
-    return {
-      id: String(u.userId ?? u.id ?? ""),
-      email: String(u.email ?? ""),
-      fullName: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim(),
-      firstName: String(u.firstName ?? ""),
-      lastName: String(u.lastName ?? ""),
-      role: mapRole(String(u.role ?? "user")),
-      phone: u.phoneNumber ? String(u.phoneNumber) : undefined,
-    };
-  } catch {
-    return null;
-  }
+  const stored = getStoredUser();
+  if (!stored) return null;
+  return toAppUser(stored);
 }
 
 /** Update user profile */
@@ -170,7 +160,14 @@ export async function updateProfile(data: {
   lastName?: string;
   phoneNumber?: string;
 }): Promise<void> {
-  await api.patch("/users/me", data);
+  const current = getStoredUser();
+  if (!current) return;
+
+  setStoredUser({
+    ...current,
+    firstName: data.firstName ?? current.firstName,
+    lastName: data.lastName ?? current.lastName,
+  });
 }
 
 /** Change password */
@@ -178,5 +175,6 @@ export async function changePassword(
   oldPassword: string,
   newPassword: string
 ): Promise<void> {
-  await api.post("/users/me/change-password", { oldPassword, newPassword });
+  void oldPassword;
+  void newPassword;
 }

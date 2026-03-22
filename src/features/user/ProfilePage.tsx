@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState, AppDispatch } from "../../app/store";
 import { setUser } from "../auth/authSlice";
 import { updateProfile, changePassword } from "../../services/authService";
+import { fetchMySubscriptionStatus } from "../../services/subscriptionService";
+import type { SubscriptionStatus } from "../../types/subscription";
 
 export default function ProfilePage() {
   const dispatch = useDispatch<AppDispatch>();
@@ -17,6 +19,63 @@ export default function ProfilePage() {
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordMsg, setPasswordMsg] = useState("");
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      const status = await fetchMySubscriptionStatus();
+      setSubscription(status);
+    };
+    void load();
+  }, []);
+
+  const planCrown = useMemo(() => {
+    if (!subscription?.active) return null;
+    if (subscription.accessPercentage >= 100) return "👑";
+    if (subscription.accessPercentage >= 50) return "🥇";
+    if (subscription.accessPercentage >= 25) return "🥈";
+    return "🥉";
+  }, [subscription]);
+
+  const crownTheme = useMemo(() => {
+    if (!subscription?.active) {
+      return null;
+    }
+
+    if (subscription.accessPercentage >= 100) {
+      return {
+        ring: "0 0 0 3px #f9d66a, 0 0 18px rgba(249,214,106,0.65)",
+        badgeBg: "linear-gradient(135deg, #f7d56c, #f0b429)",
+        badgeColor: "#5f3b00",
+        label: "Royal Crown"
+      };
+    }
+
+    if (subscription.accessPercentage >= 50) {
+      return {
+        ring: "0 0 0 3px #ffd98c, 0 0 14px rgba(255,217,140,0.55)",
+        badgeBg: "linear-gradient(135deg, #ffe7b8, #ffc764)",
+        badgeColor: "#6b4700",
+        label: "Gold Crown"
+      };
+    }
+
+    if (subscription.accessPercentage >= 25) {
+      return {
+        ring: "0 0 0 3px #d9dce2, 0 0 12px rgba(217,220,226,0.6)",
+        badgeBg: "linear-gradient(135deg, #eef0f4, #c7ccd5)",
+        badgeColor: "#334155",
+        label: "Silver Crown"
+      };
+    }
+
+    return {
+      ring: "0 0 0 3px #e3c6a3, 0 0 10px rgba(227,198,163,0.55)",
+      badgeBg: "linear-gradient(135deg, #f1dcc3, #cf9d67)",
+      badgeColor: "#5b3512",
+      label: "Bronze Crown"
+    };
+  }, [subscription]);
 
   const handleSaveProfile = async () => {
     if (!user) return;
@@ -65,7 +124,28 @@ export default function ProfilePage() {
 
   return (
     <div style={{ padding: "30px 40px", maxWidth: "700px", margin: "0 auto" }}>
-      <h2 style={{ color: "#4d3021", marginBottom: "24px" }}>My Profile</h2>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "24px", flexWrap: "wrap" }}>
+        <h2 style={{ color: "#4d3021", margin: 0 }}>My Profile</h2>
+        {subscription?.active && (
+          <span
+            style={{
+              background: "#fff3cd",
+              color: "#7a4c00",
+              border: "1px solid #f2d487",
+              borderRadius: "999px",
+              padding: "4px 10px",
+              fontSize: "12px",
+              fontWeight: 700,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <span>{planCrown}</span>
+            <span>{subscription.planName} ({subscription.accessPercentage}%)</span>
+          </span>
+        )}
+      </div>
 
       {/* Profile Card */}
       <motion.div
@@ -92,10 +172,44 @@ export default function ProfilePage() {
             fontSize: "32px",
             fontWeight: 700,
             marginBottom: "16px",
+            position: "relative",
+            boxShadow: crownTheme?.ring,
           }}
         >
           {(user.fullName ?? user.email)?.[0]?.toUpperCase() ?? "U"}
+
+          {subscription?.active && crownTheme && (
+            <div
+              style={{
+                position: "absolute",
+                top: "-12px",
+                right: "-10px",
+                minWidth: "34px",
+                height: "34px",
+                borderRadius: "999px",
+                background: crownTheme.badgeBg,
+                color: crownTheme.badgeColor,
+                border: "2px solid #fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 6px 16px rgba(0,0,0,0.22)",
+                fontSize: "18px",
+                fontWeight: 800,
+                padding: "0 8px"
+              }}
+              title={`${crownTheme.label} - ${subscription.planName}`}
+            >
+              {planCrown}
+            </div>
+          )}
         </div>
+
+        {subscription?.active && (
+          <p style={{ marginBottom: "12px", color: "#7a4c00", fontSize: "13px", fontWeight: 600 }}>
+            {planCrown} {crownTheme?.label} unlocked for your active subscription plan.
+          </p>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
           <div>

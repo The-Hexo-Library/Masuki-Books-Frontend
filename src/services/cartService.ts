@@ -73,7 +73,7 @@ function mapCartItem(item: CartItemResponse): CartItem {
 
 export async function fetchCart(_userId: string): Promise<CartItem[]> {
   try {
-    const { data } = await api.get<ApiResponse<CartResponse>>("/cart");
+    const { data } = await api.get<ApiResponse<CartResponse>>("/user/cart");
     const backendItems = (data.data?.items ?? []).map(mapCartItem);
 
     // If backend cart is empty but local fallback has items, keep local items
@@ -111,7 +111,7 @@ function updateLocalQuantity(bookId: string, quantity: number) {
 }
 
 async function findBackendCartItemId(bookId: string): Promise<string | null> {
-  const { data } = await api.get<ApiResponse<CartResponse>>("/cart");
+  const { data } = await api.get<ApiResponse<CartResponse>>("/user/cart");
   const item = data.data?.items?.find((i) => i.productId === bookId);
   return item?.cartItemId ?? null;
 }
@@ -123,7 +123,7 @@ export async function addToCart(
   book?: Book
 ): Promise<void> {
   try {
-    await api.post("/cart/items", { productId: bookId, quantity });
+    await api.post("/user/cart/items", { productId: bookId, quantity });
   } catch (err) {
     console.warn("Backend addToCart failed, using local cart:", err);
     addToLocalCart(bookId, quantity, book);
@@ -138,7 +138,7 @@ export async function updateCartQuantity(
   try {
     const cartItemId = await findBackendCartItemId(bookId);
     if (cartItemId) {
-      await api.put(`/cart/items/${cartItemId}`, { quantity });
+      await api.put(`/user/cart/items/${cartItemId}`, { quantity });
       return;
     }
 
@@ -158,7 +158,7 @@ export async function removeFromCart(
   try {
     const cartItemId = await findBackendCartItemId(bookId);
     if (cartItemId) {
-      await api.delete(`/cart/items/${cartItemId}`);
+      await api.delete(`/user/cart/items/${cartItemId}`);
     }
   } catch (err) {
     console.warn("Backend removeFromCart failed, using local:", err);
@@ -168,7 +168,9 @@ export async function removeFromCart(
 export async function clearCart(_userId: string): Promise<void> {
   persistLocalCart([]);
   try {
-    await api.delete("/cart");
+    const { data } = await api.get<ApiResponse<CartResponse>>("/user/cart");
+    const items = data.data?.items ?? [];
+    await Promise.all(items.map((i) => api.delete(`/user/cart/items/${i.cartItemId}`)));
   } catch (err) {
     console.warn("Backend clearCart failed:", err);
   }

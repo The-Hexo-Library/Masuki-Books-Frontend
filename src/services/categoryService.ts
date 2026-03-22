@@ -7,13 +7,13 @@ export interface Category {
   description: string;
   imageUrl: string | null;
   displayOrder: number;
-  isActive: boolean;
+  isActive?: boolean;
   subCategories?: Category[];
 }
 
 export async function fetchCategories(): Promise<Category[]> {
   try {
-    const { data } = await api.get<ApiResponse<Category[]>>("/categories");
+    const { data } = await api.get<ApiResponse<Category[]>>("/user/categories");
     return data.data ?? [];
   } catch {
     return [];
@@ -22,8 +22,8 @@ export async function fetchCategories(): Promise<Category[]> {
 
 export async function fetchCategory(id: string): Promise<Category | null> {
   try {
-    const { data } = await api.get<ApiResponse<Category>>(`/categories/${id}`);
-    return data.data;
+    const categories = await fetchCategories();
+    return categories.find((c) => c.categoryId === id) ?? null;
   } catch {
     return null;
   }
@@ -31,10 +31,9 @@ export async function fetchCategory(id: string): Promise<Category | null> {
 
 export async function fetchSubCategories(parentId: string): Promise<Category[]> {
   try {
-    const { data } = await api.get<ApiResponse<Category[]>>(
-      `/categories/${parentId}/children`
-    );
-    return data.data ?? [];
+    const categories = await fetchCategories();
+    const parent = categories.find((c) => c.categoryId === parentId);
+    return parent?.subCategories ?? [];
   } catch {
     return [];
   }

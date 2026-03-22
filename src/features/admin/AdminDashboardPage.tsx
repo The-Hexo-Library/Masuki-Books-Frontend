@@ -1,617 +1,313 @@
-import { useEffect, useState } from "react";
-import {
-  createBook,
-  deleteBook,
-  fetchBooks,
-  updateBook,
-} from "../../services/booksService";
-import type { Book, BookInput, Order, Review } from "../../types/book";
-import { fetchAllOrders, updateOrderStatus } from "../../services/orderService";
-import { fetchAllReviews, deleteReview, toggleReviewApproval } from "../../services/reviewService";
+import { useEffect, useMemo, useState } from "react";
+import { useSelector } from "react-redux";
+import type { RootState } from "../../app/store";
+import ConfirmDeleteModal from "./products/components/ConfirmDeleteModal";
+import ProductFormCard from "./products/components/ProductFormCard";
+import ProductTable from "./products/components/ProductTable";
+import { defaultProductForm, useProductsAdmin } from "./products/useProductsAdmin";
+import type { ProductFilters, ProductRow } from "./products/types";
 
-const emptyForm: BookInput = {
-  title: "",
-  author: "",
-  category: "",
-  price: 0,
-  description: "",
-  coverUrl: "",
-  language: "English",
-  pages: 0,
-  isbn: "",
-  publisher: "",
-  stock: 999,
-};
+type Toast = { id: number; type: "success" | "error"; message: string };
 
-type AdminTab = "books" | "orders" | "reviews" | "reports";
-
-const statusColor: Record<string, string> = {
-  pending: "#e65100",
-  confirmed: "#1565c0",
-  packed: "#6a1b9a",
-  shipped: "#5e35b1",
-  delivered: "#2e7d32",
-  cancelled: "#c62828",
-  refunded: "#795548",
-};
+function statusBadgeClass(type: Toast["type"]) {
+  return type === "success"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : "border-red-200 bg-red-50 text-red-700";
+}
 
 export default function AdminDashboardPage() {
-  const [tab, setTab] = useState<AdminTab>("books");
-  const [books, setBooks] = useState<Book[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<BookInput>(emptyForm);
+  const user = useSelector((state: RootState) => state.auth.user);
 
-  const loadBooks = async () => {
-    setLoading(true);
-    setError("");
+  const {
+    PAGE_SIZE,
+    products,
+    categories,
+    loading,
+    saving,
+    error,
+    totalCount,
+    loadCategories,
+    loadProducts,
+    createProduct,
+    updateProduct,
+    deleteProduct,
+    quickUpdateStatus,
+  } = useProductsAdmin();
 
-    try {
-      const data = await fetchBooks();
-      setBooks(data);
-    } catch (loadError) {
-      const message =
-        loadError instanceof Error ? loadError.message : "Unable to load books.";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState<ProductFilters>({
+    search: "",
+    status: "all",
+    categoryId: "all",
+    featuredSort: "updated_desc",
+  });
+  const [form, setForm] = useState(defaultProductForm());
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [editingProduct, setEditingProduct] = useState<ProductRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProductRow | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const pushToast = (type: Toast["type"], message: string) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((prev) => [...prev, { id, type, message }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 2600);
   };
 
   useEffect(() => {
-    void loadBooks();
-  }, []);
+    void loadCategories().catch(() => {
+      pushToast("error", "Unable to load categories.");
+    });
+  }, [loadCategories]);
+
+  useEffect(() => {
+    void loadProducts(filters, page);
+  }, [filters, page, loadProducts]);
+
+  useEffect(() => {
+    if (error) {
+      pushToast("error", error);
+    }
+  }, [error]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  }, [PAGE_SIZE, totalCount]);
+
+  useEffect(() => {
+    if (!form.category_id && categories.length > 0) {
+      setForm((prev) => ({
+        ...prev,
+        category_id: categories[0].category_id,
+      }));
+    }
+  }, [categories, form.category_id]);
 
   const resetForm = () => {
-    setForm(emptyForm);
-    setEditingId(null);
+    setEditingProduct(null);
+    setForm(defaultProductForm());
+    setSelectedFile(null);
   };
 
-  const handleSubmit = async () => {
-    setError("");
-    setSaving(true);
-
+  const handleSave = async () => {
     try {
-      if (editingId) {
-        await updateBook(editingId, form);
+      if (editingProduct) {
+        await updateProduct(editingProduct.product_id, form, selectedFile);
+        pushToast("success", "Product updated successfully.");
+        await loadProducts(filters, page);
       } else {
-        await createBook(form);
+        if (!selectedFile) {
+          pushToast("error", "Please attach a PDF/EPUB file before creating a product.");
+          return;
+        }
+
+        await createProduct(form, user?.id ?? "", selectedFile);
+        pushToast("success", "Product created successfully.");
+        setPage(1);
+        await loadProducts(filters, 1);
       }
 
       resetForm();
-      await loadBooks();
     } catch (saveError) {
       const message =
-        saveError instanceof Error ? saveError.message : "Unable to save book.";
-      setError(message);
-    } finally {
-      setSaving(false);
+        saveError instanceof Error && saveError.message.trim()
+          ? saveError.message
+          : "Failed to save product.";
+      pushToast("error", message);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    setError("");
-
-    try {
-      await deleteBook(id);
-      await loadBooks();
-    } catch (deleteError) {
-      const message =
-        deleteError instanceof Error
-          ? deleteError.message
-          : "Unable to delete book.";
-      setError(message);
-    }
-  };
-
-  const startEdit = (book: Book) => {
-    setEditingId(book.id);
+  const handleEdit = (product: ProductRow) => {
+    setEditingProduct(product);
     setForm({
-      title: book.title,
-      author: book.author,
-      category: book.category,
-      price: book.price,
-      description: book.description,
-      coverUrl: book.coverUrl,
-      language: book.language,
-      pages: book.pages,
-      isbn: book.isbn,
-      publisher: book.publisher,
-      stock: book.stock,
+      title: product.title ?? "",
+      author: product.author ?? "",
+      description: product.description ?? "",
+      format: (product.format as "Hardcover" | "Paperback" | "Ebook") ?? "Paperback",
+      language: product.language ?? "en",
+      pages: product.pages == null ? "" : String(product.pages),
+      isbn: product.isbn ?? "",
+      sku: product.sku ?? "",
+      price: String(product.price ?? ""),
+      compare_at_price: product.compare_at_price == null ? "" : String(product.compare_at_price),
+      publication_date: product.publication_date ?? "",
+      publisher: product.publisher ?? "",
+      status: (product.status as "active" | "draft" | "archived") ?? "draft",
+      category_id: product.category_id ?? "",
     });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const loadOrders = async () => {
-    try {
-      const data = await fetchAllOrders();
-      setOrders(data);
-    } catch { /* ignore */ }
-  };
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
 
-  const loadReviews = async () => {
     try {
-      const data = await fetchAllReviews();
-      setReviews(data);
-    } catch { /* ignore */ }
-  };
-
-  useEffect(() => {
-    if (tab === "orders") void loadOrders();
-    if (tab === "reviews") void loadReviews();
-  }, [tab]);
-
-  const handleStatusChange = async (orderId: string, status: string) => {
-    try {
-      await updateOrderStatus(orderId, status);
-      await loadOrders();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update status");
+      await deleteProduct(deleteTarget.product_id);
+      pushToast("success", "Product deleted successfully.");
+      setDeleteTarget(null);
+      await loadProducts(filters, page);
+    } catch {
+      // handled in hook + toasts
     }
   };
 
-  const handleDeleteReview = async (reviewId: string) => {
+  const handleQuickStatus = async (product: ProductRow, status: string) => {
     try {
-      await deleteReview(reviewId);
-      setReviews((prev) => prev.filter((r) => r.id !== reviewId));
-    } catch { /* ignore */ }
+      await quickUpdateStatus(product.product_id, status);
+      pushToast("success", "Status updated.");
+      await loadProducts(filters, page);
+    } catch {
+      // handled in hook + toasts
+    }
   };
 
-  const handleToggleApproval = async (reviewId: string, approved: boolean) => {
-    try {
-      await toggleReviewApproval(reviewId, approved);
-      setReviews((prev) =>
-        prev.map((r) => (r.id === reviewId ? { ...r, isApproved: approved } : r))
-      );
-    } catch { /* ignore */ }
+  const applyFilter = <K extends keyof ProductFilters>(key: K, value: ProductFilters[K]) => {
+    setPage(1);
+    setFilters((prev) => ({ ...prev, [key]: value }));
   };
-
-  // Stats
-  const totalRevenue = orders.reduce((s, o) => s + o.total, 0);
-  const lowStock = books.filter((b) => b.stock < 10);
 
   return (
-    <div style={{ padding: "40px", display: "flex", flexDirection: "column", gap: "22px" }}>
-      <h2 style={{ color: "#4d3021" }}>Admin Dashboard</h2>
+    <div className="min-h-full bg-gradient-to-br from-slate-50 via-white to-cyan-50 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Products (Books) Admin</h1>
+          <p className="mt-2 text-sm text-slate-600 sm:text-base">
+            Create, manage, and publish product records with schema-accurate Supabase operations.
+          </p>
 
-      {/* Stats cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
-        <div style={{ background: "#e6d5c9", borderRadius: "10px", padding: "18px", textAlign: "center" }}>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#4d3021" }}>{books.length}</p>
-          <p style={{ fontSize: "13px", color: "#666" }}>Total Books</p>
-        </div>
-        <div style={{ background: "#e6d5c9", borderRadius: "10px", padding: "18px", textAlign: "center" }}>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#4d3021" }}>{orders.length}</p>
-          <p style={{ fontSize: "13px", color: "#666" }}>Total Orders</p>
-        </div>
-        <div style={{ background: "#e6d5c9", borderRadius: "10px", padding: "18px", textAlign: "center" }}>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: "#2e7d32" }}>₹{totalRevenue}</p>
-          <p style={{ fontSize: "13px", color: "#666" }}>Revenue</p>
-        </div>
-        <div style={{ background: lowStock.length > 0 ? "#fff3e0" : "#e6d5c9", borderRadius: "10px", padding: "18px", textAlign: "center" }}>
-          <p style={{ fontSize: "28px", fontWeight: 700, color: lowStock.length > 0 ? "#e65100" : "#4d3021" }}>{lowStock.length}</p>
-          <p style={{ fontSize: "13px", color: "#666" }}>Low Stock Items</p>
-        </div>
-      </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <label className="xl:col-span-2 text-sm text-slate-700">
+              <span className="mb-1 block font-medium">Search title or SKU</span>
+              <input
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={filters.search}
+                onChange={(e) => applyFilter("search", e.target.value)}
+                placeholder="Search..."
+              />
+            </label>
 
-      {/* Tab bar */}
-      <div style={{ display: "flex", gap: "4px", background: "#e6d5c9", borderRadius: "10px", padding: "4px" }}>
-        {(["books", "orders", "reviews", "reports"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: "8px",
-              border: "none",
-              background: tab === t ? "#4d3021" : "transparent",
-              color: tab === t ? "#fff" : "#4d3021",
-              cursor: "pointer",
-              fontWeight: tab === t ? 600 : 400,
-              textTransform: "capitalize",
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      {/* Books Tab */}
-      {tab === "books" && (
-        <>
-      <section
-        style={{
-          background: "#e6d5c9",
-          borderRadius: "10px",
-          padding: "22px",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: "10px",
-        }}
-      >
-        <h2 style={{ color: "#4d3021", gridColumn: "1 / -1" }}>
-          {editingId ? "Edit Book" : "Add New Book"}
-        </h2>
+            <label className="text-sm text-slate-700">
+              <span className="mb-1 block font-medium">Status</span>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={filters.status}
+                onChange={(e) => applyFilter("status", e.target.value as ProductFilters["status"])}
+              >
+                <option value="all">all</option>
+                <option value="active">active</option>
+                <option value="draft">draft</option>
+                <option value="archived">archived</option>
+              </select>
+            </label>
 
-        <input
-          placeholder="Title"
-          value={form.title}
-          onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
+            <label className="text-sm text-slate-700">
+              <span className="mb-1 block font-medium">Category</span>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={filters.categoryId}
+                onChange={(e) => applyFilter("categoryId", e.target.value)}
+              >
+                <option value="all">all</option>
+                {categories.map((category) => (
+                  <option key={category.category_id} value={category.category_id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-sm text-slate-700">
+              <span className="mb-1 block font-medium">Sort</span>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                value={filters.featuredSort}
+                onChange={(e) => applyFilter("featuredSort", e.target.value as ProductFilters["featuredSort"])}
+              >
+                <option value="updated_desc">updated desc</option>
+                <option value="price_asc">price low-high</option>
+                <option value="price_desc">price high-low</option>
+                <option value="date_desc">publication newest</option>
+                <option value="date_asc">publication oldest</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
+            <p>Total products: {totalCount}</p>
+            <p>
+              Page {page} of {totalPages}
+            </p>
+          </div>
+        </header>
+
+        <ProductFormCard
+          values={form}
+          categories={categories}
+          errorMessage={error}
+          selectedFile={selectedFile}
+          editing={Boolean(editingProduct)}
+          saving={saving}
+          onChange={setForm}
+          onFileChange={setSelectedFile}
+          onSubmit={() => {
+            void handleSave();
+          }}
+          onCancel={resetForm}
         />
 
-        <input
-          placeholder="Author"
-          value={form.author}
-          onChange={(event) => setForm((prev) => ({ ...prev, author: event.target.value }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="Category"
-          value={form.category}
-          onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="Price"
-          type="number"
-          value={form.price}
-          onChange={(event) =>
-            setForm((prev) => ({ ...prev, price: Number(event.target.value) }))
-          }
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="Language"
-          value={form.language ?? ""}
-          onChange={(event) => setForm((prev) => ({ ...prev, language: event.target.value }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="Pages"
-          type="number"
-          value={form.pages ?? 0}
-          onChange={(event) => setForm((prev) => ({ ...prev, pages: Number(event.target.value) }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="ISBN"
-          value={form.isbn ?? ""}
-          onChange={(event) => setForm((prev) => ({ ...prev, isbn: event.target.value }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="Publisher"
-          value={form.publisher ?? ""}
-          onChange={(event) => setForm((prev) => ({ ...prev, publisher: event.target.value }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="Stock"
-          type="number"
-          value={form.stock ?? 999}
-          onChange={(event) => setForm((prev) => ({ ...prev, stock: Number(event.target.value) }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <input
-          placeholder="Cover URL"
-          value={form.coverUrl}
-          onChange={(event) => setForm((prev) => ({ ...prev, coverUrl: event.target.value }))}
-          style={{ padding: "10px", borderRadius: "6px", border: "1px solid #c7aa99" }}
-        />
-
-        <textarea
-          placeholder="Description"
-          value={form.description}
-          onChange={(event) =>
-            setForm((prev) => ({ ...prev, description: event.target.value }))
-          }
-          style={{
-            minHeight: "100px",
-            padding: "10px",
-            borderRadius: "6px",
-            border: "1px solid #c7aa99",
-            gridColumn: "1 / -1",
+        <ProductTable
+          products={products}
+          loading={loading}
+          categories={categories}
+          onEdit={handleEdit}
+          onDelete={(product) => setDeleteTarget(product)}
+          onQuickStatus={(product, status) => {
+            void handleQuickStatus(product, status);
           }}
         />
 
-        <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1" }}>
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <button
-            onClick={() => {
-              void handleSubmit();
-            }}
-            disabled={saving}
-            style={{
-              padding: "10px 16px",
-              border: "none",
-              borderRadius: "6px",
-              background: "#4d3021",
-              color: "white",
-              cursor: "pointer",
-              opacity: saving ? 0.7 : 1,
-            }}
+            type="button"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            disabled={page <= 1 || loading}
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
           >
-            {saving ? "Saving..." : editingId ? "Update Book" : "Create Book"}
+            Previous
           </button>
-
-          {editingId && (
-            <button
-              onClick={resetForm}
-              style={{
-                padding: "10px 16px",
-                border: "1px solid #4d3021",
-                borderRadius: "6px",
-                background: "transparent",
-                color: "#4d3021",
-                cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-          )}
+          <button
+            type="button"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+          >
+            Next
+          </button>
         </div>
 
-        {error && (
-          <p style={{ color: "#8f2a2a", fontSize: "14px", gridColumn: "1 / -1" }}>
-            {error}
-          </p>
-        )}
-      </section>
+        <ConfirmDeleteModal
+          open={Boolean(deleteTarget)}
+          title="Delete Product"
+          message={`Are you sure you want to delete ${deleteTarget?.title ?? "this product"}?`}
+          busy={saving}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            void handleDeleteConfirm();
+          }}
+        />
 
-      <section style={{ background: "#e6d5c9", borderRadius: "10px", padding: "22px" }}>
-        <h3 style={{ color: "#4d3021", marginBottom: "14px" }}>Books Catalog</h3>
-
-        {loading && <p>Loading books...</p>}
-
-        {!loading && books.length === 0 && (
-          <p>No books found. Create your first book above.</p>
-        )}
-
-        {!loading && books.length > 0 && (
-          <div style={{ display: "grid", gap: "12px" }}>
-            {books.map((book) => (
-              <div
-                key={book.id}
-                style={{
-                  background: "#fff",
-                  borderRadius: "8px",
-                  padding: "14px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: "8px",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <h4 style={{ color: "#4d3021" }}>{book.title}</h4>
-                  <p style={{ fontSize: "14px" }}>
-                    {book.author} • {book.category} • ₹{book.price} • Stock: {book.stock}
-                  </p>
-                </div>
-
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    onClick={() => startEdit(book)}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #4d3021",
-                      background: "transparent",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Edit
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      void handleDelete(book.id);
-                    }}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: "6px",
-                      border: "none",
-                      background: "#8f2a2a",
-                      color: "white",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-        </>
-      )}
-
-      {/* Orders Tab */}
-      {tab === "orders" && (
-        <section style={{ background: "#e6d5c9", borderRadius: "10px", padding: "22px" }}>
-          <h3 style={{ color: "#4d3021", marginBottom: "14px" }}>All Orders</h3>
-          {orders.length === 0 && <p>No orders found.</p>}
-          <div style={{ display: "grid", gap: "12px" }}>
-            {orders.map((order) => (
-              <div
-                key={order.id}
-                style={{
-                  background: "#fff",
-                  borderRadius: "8px",
-                  padding: "16px",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <div>
-                    <strong style={{ color: "#4d3021" }}>#{order.id.slice(0, 8)}</strong>
-                    <span style={{ fontSize: "13px", color: "#666", marginLeft: "8px" }}>
-                      {new Date(order.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <span style={{ fontWeight: 700, color: "#4d3021" }}>₹{order.total}</span>
-                </div>
-                <p style={{ fontSize: "13px", color: "#555", marginBottom: "8px" }}>
-                  {order.shippingName} • {order.shippingCity} • {order.items?.length ?? 0} items • {order.paymentMethod.toUpperCase()}
-                </p>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <span style={{ fontSize: "12px", color: "#666" }}>Status:</span>
-                  <select
-                    value={order.status}
-                    onChange={(e) => { void handleStatusChange(order.id, e.target.value); }}
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      border: `2px solid ${statusColor[order.status] ?? "#666"}`,
-                      color: statusColor[order.status] ?? "#666",
-                      fontWeight: 600,
-                      fontSize: "12px",
-                      background: "#fff",
-                    }}
-                  >
-                    {["pending", "confirmed", "packed", "shipped", "delivered", "cancelled"].map((s) => (
-                      <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Reviews Tab */}
-      {tab === "reviews" && (
-        <section style={{ background: "#e6d5c9", borderRadius: "10px", padding: "22px" }}>
-          <h3 style={{ color: "#4d3021", marginBottom: "14px" }}>All Reviews</h3>
-          {reviews.length === 0 && <p>No reviews found.</p>}
-          <div style={{ display: "grid", gap: "12px" }}>
-            {reviews.map((rev) => (
-              <div
-                key={rev.id}
-                style={{
-                  background: "#fff",
-                  borderRadius: "8px",
-                  padding: "14px",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                  <div>
-                    <strong style={{ color: "#4d3021" }}>{rev.userName ?? "Anonymous"}</strong>
-                    <span style={{ color: "#f5a623", marginLeft: "8px" }}>
-                      {"★".repeat(rev.rating)}{"☆".repeat(5 - rev.rating)}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: "12px", color: "#999" }}>
-                    {new Date(rev.createdAt).toLocaleDateString()}
-                  </span>
-                </div>
-                <p style={{ fontSize: "13px", color: "#444", marginBottom: "8px" }}>{rev.comment}</p>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    onClick={() => { void handleToggleApproval(rev.id, !rev.isApproved); }}
-                    style={{
-                      padding: "5px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid",
-                      borderColor: rev.isApproved ? "#c62828" : "#2e7d32",
-                      background: "transparent",
-                      color: rev.isApproved ? "#c62828" : "#2e7d32",
-                      cursor: "pointer",
-                      fontSize: "12px",
-                    }}
-                  >
-                    {rev.isApproved ? "Unapprove" : "Approve"}
-                  </button>
-                  <button
-                    onClick={() => { void handleDeleteReview(rev.id); }}
-                    style={{
-                      padding: "5px 12px",
-                      borderRadius: "6px",
-                      border: "none",
-                      background: "#8f2a2a",
-                      color: "#fff",
-                      cursor: "pointer",
-                      fontSize: "12px",
-                    }}
-                  >
-                    Delete
-                  </button>
-                  <span style={{
-                    padding: "5px 12px",
-                    borderRadius: "6px",
-                    fontSize: "12px",
-                    background: rev.isApproved ? "#e8f5e9" : "#fff3e0",
-                    color: rev.isApproved ? "#2e7d32" : "#e65100",
-                  }}>
-                    {rev.isApproved ? "Approved" : "Pending"}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Reports Tab */}
-      {tab === "reports" && (
-        <section style={{ background: "#e6d5c9", borderRadius: "10px", padding: "22px" }}>
-          <h3 style={{ color: "#4d3021", marginBottom: "14px" }}>Sales Reports</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-            <div style={{ background: "#fff", borderRadius: "8px", padding: "16px" }}>
-              <h4 style={{ color: "#4d3021", marginBottom: "8px" }}>Revenue Breakdown</h4>
-              <p style={{ fontSize: "14px", color: "#555" }}>Total Revenue: <strong>₹{totalRevenue}</strong></p>
-              <p style={{ fontSize: "14px", color: "#555" }}>Average Order: <strong>₹{orders.length ? Math.round(totalRevenue / orders.length) : 0}</strong></p>
-              <p style={{ fontSize: "14px", color: "#555" }}>Total Orders: <strong>{orders.length}</strong></p>
+        <div className="fixed bottom-4 right-4 z-50 flex w-[min(92vw,360px)] flex-col gap-2">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`rounded-lg border px-4 py-3 text-sm shadow ${statusBadgeClass(toast.type)}`}
+            >
+              {toast.message}
             </div>
-            <div style={{ background: "#fff", borderRadius: "8px", padding: "16px" }}>
-              <h4 style={{ color: "#4d3021", marginBottom: "8px" }}>Inventory</h4>
-              <p style={{ fontSize: "14px", color: "#555" }}>Total Books: <strong>{books.length}</strong></p>
-              <p style={{ fontSize: "14px", color: "#555" }}>Active: <strong>{books.filter(b => b.isActive).length}</strong></p>
-              <p style={{ fontSize: "14px", color: lowStock.length > 0 ? "#c62828" : "#555" }}>
-                Low Stock ({`<`}10): <strong>{lowStock.length}</strong>
-              </p>
-            </div>
-            <div style={{ background: "#fff", borderRadius: "8px", padding: "16px" }}>
-              <h4 style={{ color: "#4d3021", marginBottom: "8px" }}>Order Status</h4>
-              {["pending", "confirmed", "packed", "shipped", "delivered", "cancelled"].map((s) => {
-                const count = orders.filter((o) => o.status === s).length;
-                return (
-                  <p key={s} style={{ fontSize: "14px", color: "#555" }}>
-                    <span style={{
-                      display: "inline-block",
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      background: statusColor[s] ?? "#666",
-                      marginRight: "6px",
-                    }} />
-                    {s.charAt(0).toUpperCase() + s.slice(1)}: <strong>{count}</strong>
-                  </p>
-                );
-              })}
-            </div>
-            <div style={{ background: "#fff", borderRadius: "8px", padding: "16px" }}>
-              <h4 style={{ color: "#4d3021", marginBottom: "8px" }}>Reviews</h4>
-              <p style={{ fontSize: "14px", color: "#555" }}>Total Reviews: <strong>{reviews.length}</strong></p>
-              <p style={{ fontSize: "14px", color: "#555" }}>Approved: <strong>{reviews.filter(r => r.isApproved).length}</strong></p>
-              <p style={{ fontSize: "14px", color: "#555" }}>Pending: <strong>{reviews.filter(r => !r.isApproved).length}</strong></p>
-            </div>
-          </div>
-        </section>
-      )}
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

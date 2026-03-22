@@ -86,54 +86,14 @@ function mapOrderItemResponse(item: OrderItemResponse): OrderItem {
 export async function createOrder(
   _userId: string,
   _cartItems: CartItem[],
-  shipping: ShippingInfo,
+  _shipping: ShippingInfo,
   paymentMethod: string = "card",
   promoCode?: string,
   _discount: number = 0
 ): Promise<Order> {
-  // First ensure the user has a shipping address — create one if needed
-  let addressId: string | undefined;
-
-  try {
-    // Try to get existing addresses
-    const { data: addrData } = await api.get<ApiResponse<{ addressId: string }[]>>(
-      "/users/me/addresses"
-    );
-    if (addrData.data && addrData.data.length > 0) {
-      addressId = addrData.data[0].addressId;
-    }
-  } catch {
-    // No addresses yet
-  }
-
-  if (!addressId) {
-    // Create a shipping address
-    try {
-      const { data: newAddr } = await api.post<ApiResponse<{ addressId: string }>>(
-        "/users/me/addresses",
-        {
-          fullName: shipping.name,
-          addressLine1: shipping.address,
-          city: shipping.city,
-          state: shipping.state ?? "",
-          zipCode: shipping.zip,
-          country: shipping.country,
-          phoneNumber: shipping.phone,
-          email: shipping.email ?? "",
-          isDefault: true,
-        }
-      );
-      addressId = newAddr.data.addressId;
-    } catch (err) {
-      console.warn("Failed to create address:", err);
-      throw new Error("Failed to save shipping address");
-    }
-  }
-
-  const { data } = await api.post<ApiResponse<OrderResponse>>("/orders/checkout", {
-    shippingAddressId: addressId,
+  const { data } = await api.post<ApiResponse<OrderResponse>>("/user/checkout", {
     paymentMethod,
-    gateway: "manual",
+    gateway: "razorpay",
     discountCode: promoCode || undefined,
     currency: "INR",
   });
@@ -143,7 +103,7 @@ export async function createOrder(
 
 export async function fetchOrders(_userId: string): Promise<Order[]> {
   try {
-    const { data } = await api.get<ApiResponse<Page<OrderResponse>>>("/orders", {
+    const { data } = await api.get<ApiResponse<Page<OrderResponse>>>("/user/orders", {
       params: { size: 50 },
     });
     return (data.data.content ?? []).map(mapOrderResponse);
@@ -167,8 +127,8 @@ export async function fetchAllOrders(): Promise<Order[]> {
 
 export async function fetchOrderById(orderId: string): Promise<Order | null> {
   try {
-    const { data } = await api.get<ApiResponse<OrderResponse>>(`/orders/${orderId}`);
-    return mapOrderResponse(data.data);
+    const allOrders = await fetchOrders("");
+    return allOrders.find((o) => o.id === orderId) ?? null;
   } catch {
     return null;
   }

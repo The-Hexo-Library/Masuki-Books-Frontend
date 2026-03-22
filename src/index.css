@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 * {
   margin: 0;
   padding: 0;
@@ -9,6 +13,6 @@ body,
 #root {
   height: 100%;
   width: 100%;
-  background: #5a1f08; /* same brown as navbar */
-  font-family: Arial, Helvetica, sans-serif;
+  background: #5a1f08;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }

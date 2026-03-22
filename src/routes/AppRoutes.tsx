@@ -13,9 +13,12 @@ import OrdersPage from "../features/orders/OrdersPage";
 import OrderDetailPage from "../features/orders/OrderDetailPage";
 import WishlistPage from "../features/user/WishlistPage";
 import SubscriptionPage from "../features/user/SubscriptionPage";
+import PublicLibraryPage from "../features/library/PublicLibraryPage";
+import PrivateLibraryPage from "../features/library/PrivateLibraryPage";
 import ForgotPasswordPage from "../features/auth/ForgotPasswordPage";
 import MainLayout from "../components/layout/MainLayout";
 import ProtectedRoute from "../components/auth/ProtectedRoute";
+import SubscriptionProtectedRoute from "../components/subscription/SubscriptionProtectedRoute";
 import { useDispatch, useSelector } from "react-redux";
 import { useEffect } from "react";
 import type { AppDispatch, RootState } from "../app/store";
@@ -59,7 +62,7 @@ export default function AppRoutes() {
 
   // Load cart when user logs in
   useEffect(() => {
-    if (user) {
+    if (user && user.role !== "admin") {
       void dispatch(loadCart(user.id));
     }
   }, [dispatch, user]);
@@ -85,8 +88,20 @@ export default function AppRoutes() {
       <Route element={<MainLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/library/public" element={<PublicLibraryPage />} />
         <Route path="/book/:id" element={<BookDetailPage />} />
         <Route path="/subscription" element={<SubscriptionPage />} />
+
+        <Route
+          path="/library/private"
+          element={
+            <ProtectedRoute>
+              <SubscriptionProtectedRoute>
+                <PrivateLibraryPage />
+              </SubscriptionProtectedRoute>
+            </ProtectedRoute>
+          }
+        />
 
         <Route
           path="/cart"

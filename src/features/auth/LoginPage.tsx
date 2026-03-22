@@ -21,6 +21,12 @@ export default function LoginPage() {
 
   const handleLogin = async () => {
     setError("");
+
+    if (!email.trim() || !password.trim()) {
+      setError("Email and password are required.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {

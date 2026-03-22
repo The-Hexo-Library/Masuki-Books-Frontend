@@ -19,6 +19,15 @@ export interface Book {
   compareAtPrice?: number;
   sku?: string;
   categoryId?: string;
+  status?: string;
+  publicationDate?: string;
+  contentType?: string;
+  fileFormat?: string;
+  totalPages?: number;
+  previewPages?: number;
+  downloadable?: boolean;
+  maxDownloads?: number;
+  fileSizeBytes?: number;
   imageUrls?: string[];
 }
 
@@ -37,6 +46,21 @@ export interface BookInput {
   stock?: number;
   format?: string;
   sku?: string;
+  compareAtPrice?: number;
+  status?: string;
+  publicationDate?: string;
+  contentType?: string;
+  fileFormat?: string;
+  totalPages?: number;
+  previewPages?: number;
+  downloadable?: boolean;
+  maxDownloads?: number;
+  fileSizeBytes?: number;
+  publishToPublicLibrary?: boolean;
+  publicVisibility?: string;
+  publicNotes?: string;
+  publicEditable?: boolean;
+  publicFeatured?: boolean;
 }
 
 export interface CartItem {
