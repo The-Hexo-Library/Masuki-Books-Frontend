@@ -567,6 +567,12 @@ export interface SubscriptionStatusRow {
   limitExceeded?: boolean;
 }
 
+export interface WalletRow {
+  balance: number;
+  amountAdded?: number;
+  message?: string;
+}
+
 /** Deduplicate concurrent identical work (short-lived). Exported for tests. */
 export function dedupeRequest<T>(key: string, factory: () => Promise<T>): Promise<T> {
   const g = globalThis as unknown as { __masukiDedupe?: Map<string, Promise<unknown>> };
@@ -837,6 +843,7 @@ export async function postCheckout(body: {
   paymentMethod: string;
   currency?: string;
   discountCode?: string;
+  useWallet?: boolean;
 }): Promise<unknown> {
   try {
     const { data } = await api.post<ApiResponse<unknown>>("/user/checkout", body);
@@ -874,6 +881,29 @@ export async function getMySubscriptionStatus(): Promise<SubscriptionStatusRow> 
       "/api/subscriptions/status"
     );
     return unwrapApiResponse<SubscriptionStatusRow>(data);
+  } catch (e) {
+    throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
+  }
+}
+
+export async function getWalletBalance(): Promise<WalletRow> {
+  try {
+    const { data } = await api.get<ApiResponse<WalletRow>>("/user/wallet");
+    return unwrapApiResponse<WalletRow>(data);
+  } catch (e) {
+    throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
+  }
+}
+
+export async function topUpWallet(planId: string): Promise<WalletRow> {
+  try {
+    const { data } = await api.post<ApiResponse<WalletRow>>(
+      "/user/wallet/topup",
+      { subscriptionPlanId: planId }
+    );
+    const result = unwrapApiResponse<WalletRow>(data);
+    invalidateReadableCaches();
+    return result;
   } catch (e) {
     throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
   }

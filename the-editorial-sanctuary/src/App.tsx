@@ -33,6 +33,7 @@ import {
   Library,
   CreditCard,
   Calendar,
+  Wallet,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from './hooks/useAuth';
@@ -57,6 +58,8 @@ import {
   getUserLibraryPage,
   getSubscriptionPlansPublic,
   getPublicCategories,
+  getWalletBalance,
+  topUpWallet,
   searchPublicLibrary,
   postCheckout,
   postSubscribe,
@@ -73,6 +76,7 @@ import {
   type PagedResult,
   type ProductRow,
   type SubscriptionStatusRow,
+  type WalletRow,
 } from './services/api';
 import { subscribeAppErrors } from './services/errorBus';
 import type { AppPage as Page } from './types/navigation';
@@ -1828,6 +1832,7 @@ const SubscriptionPage = ({
   catalogTotal,
   billingCycle,
   onToggleBillingCycle,
+  walletBalance,
 }: {
   plans: UiSubscriptionPlan[];
   status: SubscriptionStatusRow | null;
@@ -1836,7 +1841,51 @@ const SubscriptionPage = ({
   catalogTotal: number;
   billingCycle: 'annual' | 'monthly';
   onToggleBillingCycle: () => void;
-}) => (
+  walletBalance: number;
+}) => {
+  const [selectedPlan, setSelectedPlan] = useState<UiSubscriptionPlan | null>(null);
+  const [payCardName, setPayCardName] = useState('');
+  const [payCardNumber, setPayCardNumber] = useState('');
+  const [payExpiry, setPayExpiry] = useState('');
+  const [payCvv, setPayCvv] = useState('');
+  const [payError, setPayError] = useState('');
+  const [paying, setPaying] = useState(false);
+
+  const openPaymentModal = (plan: UiSubscriptionPlan) => {
+    setSelectedPlan(plan);
+    setPayCardName('');
+    setPayCardNumber('');
+    setPayExpiry('');
+    setPayCvv('');
+    setPayError('');
+    setPaying(false);
+  };
+
+  const closePaymentModal = () => {
+    if (paying) return;
+    setSelectedPlan(null);
+    setPayError('');
+  };
+
+  const handlePayAndTopUp = () => {
+    if (!selectedPlan) return;
+    setPayError('');
+    const digits = payCardNumber.replace(/\D+/g, '');
+    if (!payCardName.trim()) { setPayError('Enter the cardholder name.'); return; }
+    if (digits.length < 12) { setPayError('Enter a valid card number (at least 12 digits).'); return; }
+    if (!payExpiry.trim()) { setPayError('Enter the expiry date.'); return; }
+    if (payCvv.trim().length < 3) { setPayError('Enter a valid CVV.'); return; }
+
+    setPaying(true);
+    onSubscribe(selectedPlan.id);
+    // Close modal after a short delay to let the toast show
+    setTimeout(() => {
+      setPaying(false);
+      setSelectedPlan(null);
+    }, 1200);
+  };
+
+  return (
   <div className="max-w-screen-2xl mx-auto px-8 py-20 space-y-20">
     <section className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-10 items-stretch">
       <div className="relative overflow-hidden rounded-[2rem] border border-outline-variant/20 bg-surface-container-low p-10 md:p-14 book-shadow">
@@ -1865,12 +1914,12 @@ const SubscriptionPage = ({
               <p className="mt-2 font-headline text-3xl text-primary">{catalogTotal}</p>
             </div>
             <div className="rounded-2xl bg-white/75 border border-outline-variant/20 p-5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Membership</p>
-              <p className="mt-2 font-headline text-2xl text-primary">{status?.planName ?? 'Not active'}</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Wallet Balance</p>
+              <p className="mt-2 font-headline text-2xl text-primary">{formatMoney(walletBalance)}</p>
             </div>
             <div className="rounded-2xl bg-white/75 border border-outline-variant/20 p-5">
               <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">State</p>
-              <p className="mt-2 font-headline text-2xl text-primary">{status?.active ? 'Active' : 'Available'}</p>
+              <p className="mt-2 font-headline text-2xl text-primary">{walletBalance > 0 ? 'Funded' : 'Empty'}</p>
             </div>
           </div>
         </div>
@@ -1883,33 +1932,29 @@ const SubscriptionPage = ({
         </div>
         <div className="relative space-y-8">
           <div className="space-y-3">
-            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-secondary-container">Current Access</p>
-            <h2 className="font-headline text-3xl italic">{status?.planName ?? 'No active plan'}</h2>
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-secondary-container">Your Wallet</p>
+            <h2 className="font-headline text-4xl italic">{formatMoney(walletBalance)}</h2>
             <p className="text-sm text-secondary-container/90 leading-relaxed">
-              {status
-                ? `Status: ${status.active ? 'active' : status.status ?? 'inactive'}`
-                : 'Select a plan below to unlock membership and keep your reading flow uninterrupted.'}
+              {walletBalance > 0
+                ? 'Use your wallet balance to pay for books during checkout.'
+                : 'Purchase a plan below to add credits to your wallet for book purchases.'}
             </p>
           </div>
 
           <div className="rounded-2xl bg-white/10 border border-white/15 p-5 space-y-4">
             <div className="flex items-center justify-between gap-4">
-              <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-secondary-container">Billing view</span>
-              <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-secondary-container">{billingCycle}</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-secondary-container">How it works</span>
             </div>
-            <div className="flex items-center justify-between gap-4">
-              <button type="button" onClick={onToggleBillingCycle} className="flex-1 rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-left transition-colors hover:bg-white/15">
-                <p className="text-xs font-bold uppercase tracking-widest text-secondary-container">Toggle pricing view</p>
-                <p className="mt-1 text-sm text-secondary-container/90">Switch between annual and monthly commitment labels.</p>
-              </button>
-            </div>
+            <p className="text-sm text-secondary-container/90 leading-relaxed">
+              Purchase any plan to instantly add credits to your wallet. Use those credits at checkout to pay for books — if your wallet covers the total, no card needed!
+            </p>
           </div>
 
           <ul className="space-y-4 text-sm text-secondary-container/95">
             {[
-              'Unlock curated reading access.',
-              'Keep your current shelf visible across sessions.',
-              'Move through the catalog without breaking the reading flow.',
+              'Buy plans multiple times to stack credits.',
+              'Apply wallet balance at checkout automatically.',
+              'Pay only the difference if total exceeds balance.',
             ].map((item) => (
               <li key={item} className="flex items-start gap-3">
                 <Check className="mt-0.5 h-4 w-4 flex-none" />
@@ -1953,7 +1998,7 @@ const SubscriptionPage = ({
 
           <div className="mt-8 flex items-end gap-2">
             <span className="font-headline text-5xl text-primary">${plan.price}</span>
-            <span className="pb-1 text-sm text-on-surface-variant">/{billingCycle === 'annual' ? 'annual access' : 'monthly access'}</span>
+            <span className="pb-1 text-sm text-on-surface-variant">wallet credit</span>
           </div>
 
           <ul className="mt-8 space-y-4">
@@ -1974,13 +2019,91 @@ const SubscriptionPage = ({
                 ? 'primary-gradient text-on-primary shadow-lg hover:opacity-95'
                 : 'bg-surface-container-high text-primary hover:bg-surface-container-highest'
             }`}
-            onClick={() => onSubscribe(plan.id)}
+            onClick={() => openPaymentModal(plan)}
           >
-            Choose {plan.title}
+            Add ${plan.price} to Wallet
           </button>
         </div>
       ))}
     </section>
+
+    {/* Payment Modal Overlay */}
+    {selectedPlan ? (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={closePaymentModal}>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.2 }}
+          className="relative w-full max-w-md mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Modal Header */}
+          <div className="bg-primary p-6 text-on-primary relative">
+            <div className="absolute inset-0 opacity-20 pointer-events-none">
+              <div className="absolute -top-8 -right-8 h-28 w-28 rounded-full bg-white/20 blur-2xl" />
+            </div>
+            <div className="relative flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-secondary-container">Wallet Top-Up</p>
+                <h3 className="font-headline text-2xl italic">{selectedPlan.title}</h3>
+              </div>
+              <div className="text-right">
+                <p className="font-headline text-3xl">${selectedPlan.price}</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-secondary-container">one-time</p>
+              </div>
+            </div>
+            <button type="button" onClick={closePaymentModal} className="absolute top-4 right-4 p-1 rounded-full hover:bg-white/20 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Card Form */}
+          <div className="p-6 space-y-5">
+            <p className="text-sm text-on-surface-variant">
+              Enter your payment details to add <span className="font-bold text-primary">${selectedPlan.price}</span> to your wallet.
+            </p>
+
+            {payError ? (
+              <p className="text-xs text-on-surface-variant bg-surface-container-low rounded-lg px-3 py-2" role="alert">{payError}</p>
+            ) : null}
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Cardholder Name</label>
+                <input type="text" value={payCardName} onChange={(e) => setPayCardName(e.target.value)} placeholder="Name on card" className="w-full bg-surface-container-low border-none rounded-lg px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-primary" disabled={paying} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Card Number</label>
+                <input type="text" value={payCardNumber} onChange={(e) => setPayCardNumber(e.target.value)} placeholder="0000 0000 0000 0000" className="w-full bg-surface-container-low border-none rounded-lg px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-primary" disabled={paying} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Expiry Date</label>
+                  <input type="text" value={payExpiry} onChange={(e) => setPayExpiry(e.target.value)} placeholder="MM / YY" className="w-full bg-surface-container-low border-none rounded-lg px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-primary" disabled={paying} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">CVV</label>
+                  <input type="text" value={payCvv} onChange={(e) => setPayCvv(e.target.value)} placeholder="123" className="w-full bg-surface-container-low border-none rounded-lg px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-primary" disabled={paying} />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 space-y-3">
+              <button type="button" onClick={handlePayAndTopUp} disabled={paying} className="w-full primary-gradient text-on-primary py-4 rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl active:scale-[0.98] transition-transform disabled:opacity-70">
+                {paying ? 'Processing…' : `Pay $${selectedPlan.price} & Add to Wallet`}
+              </button>
+              <button type="button" onClick={closePaymentModal} disabled={paying} className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container-low transition-colors disabled:opacity-50">
+                Cancel
+              </button>
+            </div>
+
+            <p className="text-[10px] text-center text-on-surface-variant uppercase tracking-widest">
+              Encrypted SSL Transaction • Instant Credit
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    ) : null}
 
     <section className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center pt-4">
       <div className="relative aspect-[4/3] overflow-hidden rounded-[2rem] bg-on-background book-shadow">
@@ -2005,14 +2128,15 @@ const SubscriptionPage = ({
             <p className="mt-3 font-headline text-4xl text-primary">{catalogTotal}</p>
           </div>
           <div className="rounded-2xl bg-surface-container-low p-6 md:p-8">
-            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-on-surface-variant">Billing mode</p>
-            <p className="mt-3 font-headline text-3xl text-primary">{billingCycle === 'annual' ? 'Annual' : 'Monthly'}</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-on-surface-variant">Wallet</p>
+            <p className="mt-3 font-headline text-3xl text-primary">{formatMoney(walletBalance)}</p>
           </div>
         </div>
       </div>
     </section>
   </div>
-);
+  );
+};
 
 const CheckoutPage = ({
   setPage,
@@ -2022,6 +2146,9 @@ const CheckoutPage = ({
   onDownloadInvoice,
   invoice,
   checkoutError,
+  walletBalance,
+  useWallet,
+  onToggleWallet,
 }: {
   setPage: (p: Page) => void;
   cartBooks: Book[];
@@ -2041,11 +2168,18 @@ const CheckoutPage = ({
     paymentLabel: string;
   } | null;
   checkoutError?: string;
+  walletBalance: number;
+  useWallet: boolean;
+  onToggleWallet: () => void;
 }) => {
   const [cardholderName, setCardholderName] = useState('');
   const [cardNumber, setCardNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [cvv, setCvv] = useState('');
+
+  const subtotalNum = cartBooks.reduce((sum, b) => sum + parseCurrencyAmount(b.price), 0);
+  const walletDeduction = useWallet ? Math.min(walletBalance, subtotalNum) : 0;
+  const remainingToPay = Math.max(0, subtotalNum - walletDeduction);
 
   const submitPayment = () => {
     void onFinalize({
@@ -2192,10 +2326,44 @@ const CheckoutPage = ({
               <span>ARCHIVAL TAX</span>
               <span>{formatMoney(0)}</span>
             </div>
+
+            {/* Wallet Toggle */}
+            {walletBalance > 0 ? (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Wallet className="w-5 h-5 text-primary" />
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-primary">Wallet Balance</p>
+                      <p className="text-sm text-on-surface-variant">{formatMoney(walletBalance)} available</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onToggleWallet}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${useWallet ? 'bg-primary' : 'bg-outline-variant/30'}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${useWallet ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+                {useWallet ? (
+                  <div className="flex justify-between text-sm font-medium text-primary">
+                    <span>WALLET APPLIED</span>
+                    <span>−{formatMoney(walletDeduction)}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="flex justify-between items-baseline pt-4">
-              <span className="font-headline text-3xl text-primary italic">Total Investment</span>
-              <span className="font-headline text-5xl text-primary italic">{subtotalLabel}</span>
+              <span className="font-headline text-3xl text-primary italic">Total to Pay</span>
+              <span className="font-headline text-5xl text-primary italic">{formatMoney(remainingToPay)}</span>
             </div>
+            {useWallet && walletDeduction > 0 ? (
+              <p className="text-xs text-on-surface-variant text-center">
+                {remainingToPay === 0 ? 'Fully covered by wallet — no card charge needed!' : `${formatMoney(walletDeduction)} from wallet, ${formatMoney(remainingToPay)} charged to card.`}
+              </p>
+            ) : null}
           </div>
           <button type="button" className="w-full primary-gradient text-on-primary py-5 rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl active:scale-[0.98] transition-transform" onClick={submitPayment}>
             FINALIZE & DOWNLOAD
@@ -3344,6 +3512,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [publicCategories, setPublicCategories] = useState<CategoryRow[]>([]);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [useWalletAtCheckout, setUseWalletAtCheckout] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -3489,6 +3659,15 @@ export default function App() {
     () => (initializing || !user ? Promise.resolve(null as SubscriptionStatusRow | null) : getMySubscriptionStatus().catch(() => null)),
     [user?.userId, initializing]
   );
+
+  const walletState = useFetch(
+    () => (initializing || !user ? Promise.resolve(null as WalletRow | null) : getWalletBalance().catch(() => null)),
+    [user?.userId, initializing]
+  );
+
+  useEffect(() => {
+    setWalletBalance(walletState.data?.balance ?? 0);
+  }, [walletState.data]);
 
   const categoriesState = useFetch(
     () => (initializing || !user ? Promise.resolve([] as CategoryRow[]) : getUserCategories().catch(() => [] as CategoryRow[])),
@@ -3875,21 +4054,19 @@ export default function App() {
     setSubscriptionActionError('');
     void (async () => {
       if (!user) {
-        setSubscriptionActionError('Sign in to subscribe.');
+        setSubscriptionActionError('Sign in to purchase a plan.');
         return;
       }
       try {
-        await postSubscribe(planId);
+        const walletResult = await topUpWallet(planId);
+        setWalletBalance(walletResult.balance ?? 0);
+        walletState.refetch();
         subStatusState.refetch();
+        showToast(`$${walletResult.amountAdded ?? 0} added to your wallet! Balance: $${walletResult.balance ?? 0}`);
       } catch (e) {
-        try {
-          await activateUserSubscription(planId);
-          subStatusState.refetch();
-        } catch (e2) {
-          setSubscriptionActionError(
-            e2 instanceof Error ? e2.message : 'Subscription failed.'
-          );
-        }
+        setSubscriptionActionError(
+          e instanceof Error ? e.message : 'Purchase failed.'
+        );
       }
     })();
   };
@@ -3912,6 +4089,7 @@ export default function App() {
         gateway: 'demo',
         paymentMethod: 'card',
         currency: 'USD',
+        useWallet: useWalletAtCheckout,
       })) as {
         order?: { orderId?: string; totalAmount?: number | string; items?: Array<{ totalPrice?: number | string }> };
         payment?: { paymentId?: string; amount?: number | string };
@@ -3939,6 +4117,8 @@ export default function App() {
       setLibraryActionMsg('Checkout successful. Purchased books are now in your private library.');
       setPage('personal-library');
       cartState.refetch();
+      walletState.refetch();
+      setUseWalletAtCheckout(false);
     } catch (e) {
       setCheckoutErr(e instanceof Error ? e.message : 'Checkout failed.');
     }
@@ -4355,17 +4535,21 @@ export default function App() {
                 catalogTotal={catalogRows.length}
                 billingCycle={billingCycle}
                 onToggleBillingCycle={handleToggleBillingCycle}
+                walletBalance={walletBalance}
               />
             )}
             {page === 'checkout' && (
               <CheckoutPage
                 setPage={setPage}
                 cartBooks={activeCartBooks}
-                subtotalLabel={formatMoney(Number(cart?.subtotal ?? 0))}
+                subtotalLabel={formatMoney(activeCartBooks.reduce((sum, b) => sum + parseCurrencyAmount(b.price), 0))}
                 onFinalize={handleFinalizeCheckout}
                 onDownloadInvoice={handleDownloadInvoice}
                 invoice={latestInvoice}
                 checkoutError={checkoutErr}
+                walletBalance={walletBalance}
+                useWallet={useWalletAtCheckout}
+                onToggleWallet={() => setUseWalletAtCheckout(c => !c)}
               />
             )}
             {page === 'login' && (
