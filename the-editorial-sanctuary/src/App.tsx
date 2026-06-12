@@ -60,6 +60,7 @@ import {
   getPublicCategories,
   searchPublicLibrary,
   postCheckout,
+  verifyRazorpayCheckout,
   postSubscribe,
   removeCartItem,
   upsertAdminPublicLibrary,
@@ -2717,16 +2718,12 @@ const CheckoutPage = ({
   onDownloadInvoice,
   invoice,
   checkoutError,
+  isProcessing,
 }: {
   setPage: (p: Page) => void;
   cartBooks: Book[];
   subtotalLabel: string;
-  onFinalize: (payment: {
-    cardholderName: string;
-    cardNumber: string;
-    expiry: string;
-    cvv: string;
-  }) => Promise<void>;
+  onFinalize: () => Promise<void>;
   onDownloadInvoice: () => void;
   invoice?: {
     invoiceNumber: string;
@@ -2736,19 +2733,11 @@ const CheckoutPage = ({
     paymentLabel: string;
   } | null;
   checkoutError?: string;
+  isProcessing?: boolean;
 }) => {
-  const [cardholderName, setCardholderName] = useState('');
-  const [cardNumber, setCardNumber] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [cvv, setCvv] = useState('');
-
   const submitPayment = () => {
-    void onFinalize({
-      cardholderName,
-      cardNumber,
-      expiry,
-      cvv,
-    });
+    if (isProcessing) return;
+    void onFinalize();
   };
 
   return (
@@ -2812,49 +2801,13 @@ const CheckoutPage = ({
               </div>
             </div>
             <div className="bg-surface-container-low p-8 rounded-xl space-y-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Cardholder Name</label>
-                <input
-                  type="text"
-                  value={cardholderName}
-                  onChange={(e) => setCardholderName(e.target.value)}
-                  placeholder="Name on card"
-                  className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Card Number</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={cardNumber}
-                    onChange={(e) => setCardNumber(e.target.value)}
-                    placeholder="0000 0000 0000 0000"
-                    className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                  />
-                  <User className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-6">
+              <div className="flex items-start gap-4 p-4 bg-primary/5 rounded-lg border border-primary/20 animate-fade-in">
+                <CreditCard className="w-6 h-6 text-primary flex-shrink-0 mt-0.5" />
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Expiry Date</label>
-                  <input
-                    type="text"
-                    value={expiry}
-                    onChange={(e) => setExpiry(e.target.value)}
-                    placeholder="MM / YY"
-                    className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">CVV</label>
-                  <input
-                    type="text"
-                    value={cvv}
-                    onChange={(e) => setCvv(e.target.value)}
-                    placeholder="123"
-                    className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                  />
+                  <h4 className="text-sm font-bold text-primary uppercase tracking-widest text-xs">Razorpay Secure Checkout</h4>
+                  <p className="text-xs text-on-surface-variant leading-relaxed">
+                    By clicking "FINALIZE & DOWNLOAD", Razorpay's secure payment window will open. Pay with UPI, cards, net banking, or wallets.
+                  </p>
                 </div>
               </div>
             </div>
@@ -2892,8 +2845,13 @@ const CheckoutPage = ({
                 <span className="font-headline text-5xl text-primary italic">{subtotalLabel}</span>
               </div>
             </div>
-            <button type="button" className="w-full primary-gradient text-on-primary py-5 rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl active:scale-[0.98] transition-transform" onClick={submitPayment}>
-              FINALIZE & DOWNLOAD
+            <button
+              type="button"
+              disabled={isProcessing || cartBooks.length === 0}
+              className="w-full primary-gradient text-on-primary py-5 rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl active:scale-[0.98] transition-transform disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={submitPayment}
+            >
+              {isProcessing ? 'OPENING RAZORPAY…' : 'FINALIZE & DOWNLOAD'}
             </button>
             {invoice ? (
               <div className="bg-white rounded-xl border border-outline-variant/20 p-5 space-y-2">
@@ -4058,6 +4016,7 @@ const AdminEditBookPage = ({
     });
     const [adminBookSaving, setAdminBookSaving] = useState(false);
     const [checkoutErr, setCheckoutErr] = useState('');
+    const [checkoutProcessing, setCheckoutProcessing] = useState(false);
     const [landingLibraryTab, setLandingLibraryTab] = useState<'reading' | 'collections'>('reading');
     const [landingLibrarySort, setLandingLibrarySort] = useState('Recent Activity');
     const [publicSortMode, setPublicSortMode] = useState<'latest' | 'title'>('latest');
@@ -4705,53 +4664,104 @@ const AdminEditBookPage = ({
       })();
     };
 
-    const handleFinalizeCheckout = async (payment: {
-      cardholderName: string;
-      cardNumber: string;
-      expiry: string;
-      cvv: string;
-    }) => {
+    const loadRazorpayScript = () =>
+      new Promise<void>((resolve, reject) => {
+        if (typeof window !== 'undefined' && (window as Window & { Razorpay?: unknown }).Razorpay) {
+          resolve();
+          return;
+        }
+        const existing = document.querySelector('script[data-razorpay-checkout="true"]');
+        if (existing) {
+          existing.addEventListener('load', () => resolve(), { once: true });
+          existing.addEventListener('error', () => reject(new Error('Failed to load Razorpay checkout.')), { once: true });
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.async = true;
+        script.dataset.razorpayCheckout = 'true';
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error('Failed to load Razorpay checkout.'));
+        document.body.appendChild(script);
+      });
+
+    const handleFinalizeCheckout = async () => {
       setCheckoutErr('');
-      const numberDigits = payment.cardNumber.replace(/\D+/g, '');
-      if (!payment.cardholderName.trim() || numberDigits.length < 12 || !payment.expiry.trim() || payment.cvv.trim().length < 3) {
-        setCheckoutErr('Enter valid debit/credit card details to continue.');
+
+      if (activeCartBooks.length === 0) {
+        setCheckoutErr('Your cart is empty.');
         return;
       }
 
+      setCheckoutProcessing(true);
       try {
-        const result = (await postCheckout({
-          gateway: 'demo',
+        const result = await postCheckout({
+          gateway: 'razorpay',
           paymentMethod: 'card',
-          currency: 'USD',
-        })) as {
-          order?: { orderId?: string; totalAmount?: number | string; items?: Array<{ totalPrice?: number | string }> };
-          payment?: { paymentId?: string; amount?: number | string };
-        };
-
-        const orderId = String(result?.order?.orderId ?? '').trim() || `ORD-${Date.now()}`;
-        const lineItems = Array.isArray(result?.order?.items) ? result.order.items : [];
-        const lineItemTotal = lineItems.reduce((sum, item) => sum + Number(item.totalPrice ?? 0), 0);
-        const backendTotalRaw = result?.order?.totalAmount ?? result?.payment?.amount;
-        const backendTotal = typeof backendTotalRaw === 'number' ? backendTotalRaw : Number(backendTotalRaw ?? 0);
-        const totalAmount = Number.isFinite(lineItemTotal) && lineItemTotal > 0 ? lineItemTotal : backendTotal;
-        const last4 = numberDigits.slice(-4);
-
-        setLatestInvoice({
-          invoiceNumber: `INV-${Date.now()}`,
-          orderId,
-          amountLabel: formatMoney(Number.isFinite(totalAmount) ? totalAmount : 0),
-          dateLabel: new Date().toLocaleString(),
-          paymentLabel: `Card ending ${last4 || 'XXXX'}`,
+          currency: 'INR',
         });
 
-        libState.refetch();
-        adminOrdersState.refetch();
-        window.dispatchEvent(new CustomEvent(ORDER_ACTIVITY_EVENT));
-        setLibraryActionMsg('Checkout successful. Purchased books are now in your private library.');
-        setPage('personal-library');
-        cartState.refetch();
+        if (!result.keyId || !result.razorpayOrderId || !result.amount) {
+          setCheckoutErr('Failed to initialize payment. Please try again.');
+          setCheckoutProcessing(false);
+          return;
+        }
+
+        await loadRazorpayScript();
+        const storedUser = getStoredUser();
+        const RazorpayCtor = (window as Window & {
+          Razorpay: new (options: Record<string, unknown>) => {
+            open: () => void;
+          };
+        }).Razorpay;
+
+        const rzp = new RazorpayCtor({
+          key: result.keyId,
+          amount: result.amount,
+          currency: result.currency,
+          name: 'Masuki Books',
+          description: 'Digital book purchase',
+          order_id: result.razorpayOrderId,
+          prefill: storedUser
+            ? {
+                email: storedUser.email,
+                name: `${storedUser.firstName ?? ''} ${storedUser.lastName ?? ''}`.trim(),
+              }
+            : {},
+          theme: { color: '#1e3a5f' },
+          handler: async (response: {
+            razorpay_order_id: string;
+            razorpay_payment_id: string;
+            razorpay_signature: string;
+          }) => {
+            try {
+              await verifyRazorpayCheckout({
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature,
+              });
+              setLibraryActionMsg('Payment successful! Your purchased books are now in your private library.');
+              navigateToPage('personal-library');
+              libState.refetch();
+              cartState.refetch();
+            } catch (e) {
+              setCheckoutErr(e instanceof Error ? e.message : 'Payment verification failed.');
+            } finally {
+              setCheckoutProcessing(false);
+            }
+          },
+          modal: {
+            ondismiss: () => {
+              setCheckoutProcessing(false);
+              setCheckoutErr('Payment was cancelled. You can try again whenever you\'re ready.');
+            },
+          },
+        });
+
+        rzp.open();
       } catch (e) {
         setCheckoutErr(e instanceof Error ? e.message : 'Checkout failed.');
+        setCheckoutProcessing(false);
       }
     };
 
@@ -5052,6 +5062,15 @@ const AdminEditBookPage = ({
       window.scrollTo(0, 0);
     }, [page]);
 
+    // Legacy Stripe redirect callbacks (no-op for Razorpay modal checkout)
+    useEffect(() => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const status = urlParams.get('status');
+      if (status === 'success' || status === 'cancel') {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }, []);
+
     useEffect(() => {
       if (initializing || isAuthenticated) return;
       if (protectedPages.includes(page)) {
@@ -5182,6 +5201,7 @@ const AdminEditBookPage = ({
                   onDownloadInvoice={handleDownloadInvoice}
                   invoice={latestInvoice}
                   checkoutError={checkoutErr}
+                  isProcessing={checkoutProcessing}
                 />
               )}
               {page === 'login' && (

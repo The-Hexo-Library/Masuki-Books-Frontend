@@ -18,4 +18,5 @@ export type AppPage =
   | "archive-ethics"
   | "contact-support"
   | "my-queries"
-  | "help-center";
+  | "help-center"
+  | "payment-success";

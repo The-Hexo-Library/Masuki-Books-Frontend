@@ -12,7 +12,7 @@ const isLocalHost =
   resolvedHost === "localhost" || resolvedHost === "127.0.0.1";
 
 const DEFAULT_API_URL = isLocalHost
-  ? "http://localhost:8001"
+  ? "http://localhost:8081"
   : "https://masuki-books-backend.onrender.com";
 
 const envApiUrl = import.meta.env.VITE_API_URL?.trim();
@@ -832,17 +832,71 @@ export async function removeCartItem(cartItemId: string): Promise<CartRow> {
   }
 }
 
+export type CheckoutSessionResult = {
+  keyId: string;
+  razorpayOrderId: string;
+  amount: number;
+  currency: string;
+};
+
+type CheckoutFlowPayload = {
+  publishableKey?: string;
+  razorpayOrderId?: string;
+  amount?: number;
+  currency?: string;
+};
+
+function parseCheckoutSessionResult(data: unknown): CheckoutSessionResult {
+  const result = unwrapApiResponse<CheckoutFlowPayload>(data);
+  return {
+    keyId: result?.publishableKey ?? "",
+    razorpayOrderId: result?.razorpayOrderId ?? "",
+    amount: result?.amount ?? 0,
+    currency: result?.currency ?? "INR",
+  };
+}
+
+export async function verifyRazorpayCheckout(body: {
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature: string;
+}): Promise<void> {
+  try {
+    await api.post<ApiResponse<unknown>>("/user/checkout/verify", body);
+    invalidateReadableCaches();
+  } catch (e) {
+    throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
+  }
+}
+
 export async function postCheckout(body: {
   gateway: string;
   paymentMethod: string;
   currency?: string;
   discountCode?: string;
-}): Promise<unknown> {
+}): Promise<CheckoutSessionResult> {
   try {
-    const { data } = await api.post<ApiResponse<unknown>>("/user/checkout", body);
-    const result = unwrapApiResponse<unknown>(data);
+    const { data } = await api.post<ApiResponse<CheckoutFlowPayload>>("/user/checkout", body);
+    const checkoutResponse = parseCheckoutSessionResult(data);
     invalidateReadableCaches();
-    return result;
+    return checkoutResponse;
+  } catch (e) {
+    throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
+  }
+}
+
+export async function postPublicCheckout(body: {
+  gateway: string;
+  paymentMethod: string;
+  currency?: string;
+  discountCode?: string;
+  items: Array<{ productId: string; quantity: number }>;
+}): Promise<CheckoutSessionResult> {
+  try {
+    const { data } = await api.post<ApiResponse<CheckoutFlowPayload>>("/public/checkout", body);
+    const checkoutResponse = parseCheckoutSessionResult(data);
+    invalidateReadableCaches();
+    return checkoutResponse;
   } catch (e) {
     throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
   }
