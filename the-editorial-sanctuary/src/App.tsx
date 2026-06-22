@@ -4709,7 +4709,7 @@ const AdminEditBookPage = ({
 
         await loadRazorpayScript();
         const storedUser = getStoredUser();
-        const RazorpayCtor = (window as Window & {
+        const RazorpayCtor = (window as unknown as Window & {
           Razorpay: new (options: Record<string, unknown>) => {
             open: () => void;
           };

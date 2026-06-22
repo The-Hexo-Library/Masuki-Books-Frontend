@@ -4,7 +4,7 @@ import Notifications from './Notifications';
 import { useAuth } from '../hooks/useAuth';
 
 export default function NavBar() {
-  const { user, onLogout, isAuthenticated } = useAuth();
+  const { user, signOut: onLogout, isAuthenticated } = useAuth();
 
   return (
     <nav className="w-full border-b bg-background/80 p-4">
