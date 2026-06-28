@@ -12,7 +12,7 @@ const isLocalHost =
   resolvedHost === "localhost" || resolvedHost === "127.0.0.1";
 
 const DEFAULT_API_URL = isLocalHost
-  ? "http://localhost:8001"
+  ? "http://localhost:8081"
   : "https://masuki-books-backend.onrender.com";
 
 const envApiUrl = import.meta.env.VITE_API_URL?.trim();
@@ -843,6 +843,62 @@ export async function postCheckout(body: {
     const result = unwrapApiResponse<unknown>(data);
     invalidateReadableCaches();
     return result;
+  } catch (e) {
+    throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
+  }
+}
+
+export async function postRazorpayCreateOrder(body: {
+  amountPaise: number;
+  currency: string;
+  receipt: string;
+  internalOrderId?: string;
+  customerEmail?: string;
+}): Promise<{
+  order_id: string;
+  amount: number;
+  currency: string;
+  key_id: string;
+}> {
+  try {
+    // Backend (RazorpayCreateOrderRequest) expects `amount` in paise, not `amountPaise`.
+    const { data } = await api.post<ApiResponse<unknown>>("/api/create-order", {
+      amount: body.amountPaise,
+      currency: body.currency,
+      receipt: body.receipt,
+      internalOrderId: body.internalOrderId,
+      customerEmail: body.customerEmail,
+    });
+    const result = unwrapApiResponse<unknown>(data) as {
+      order_id: string;
+      amount: number;
+      currency: string;
+      key_id: string;
+    };
+    return result;
+  } catch (e) {
+    throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
+  }
+}
+
+export async function postRazorpayVerifyPayment(body: {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+  internalOrderId: string;
+}): Promise<{ success: true }> {
+  try {
+    // Backend (RazorpayVerifyPaymentRequest) expects camelCase field names plus internalOrderId.
+    const { data } = await api.post<ApiResponse<unknown>>("/api/verify-payment", {
+      razorpayOrderId: body.razorpay_order_id,
+      razorpayPaymentId: body.razorpay_payment_id,
+      razorpaySignature: body.razorpay_signature,
+      internalOrderId: body.internalOrderId,
+    });
+    // unwrapApiResponse throws unless the envelope reports success === true,
+    // so reaching this line means the signature was verified server-side.
+    unwrapApiResponse<unknown>(data);
+    return { success: true };
   } catch (e) {
     throw e instanceof ApiError ? e : new Error(extractErrorMessage(e));
   }

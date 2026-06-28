@@ -60,6 +60,8 @@ import {
   getPublicCategories,
   searchPublicLibrary,
   postCheckout,
+  postRazorpayCreateOrder,
+  postRazorpayVerifyPayment,
   postSubscribe,
   removeCartItem,
   upsertAdminPublicLibrary,
@@ -85,6 +87,7 @@ import {
   type ContactSubmissionRow,
 } from './services/api';
 import { subscribeAppErrors } from './services/errorBus';
+import { loadRazorpayCheckoutScript } from './services/razorpay';
 import type { AppPage as Page } from './types/navigation';
 import FloatingMenu from './components/FloatingMenu';
 
@@ -2729,12 +2732,7 @@ const CheckoutPage = ({
   setPage: (p: Page) => void;
   cartBooks: Book[];
   subtotalLabel: string;
-  onFinalize: (payment: {
-    cardholderName: string;
-    cardNumber: string;
-    expiry: string;
-    cvv: string;
-  }) => Promise<void>;
+  onFinalize: () => Promise<void>;
   onDownloadInvoice: () => void;
   invoice?: {
     invoiceNumber: string;
@@ -2745,18 +2743,12 @@ const CheckoutPage = ({
   } | null;
   checkoutError?: string;
 }) => {
-  const [cardholderName, setCardholderName] = useState('');
-  const [cardNumber, setCardNumber] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [cvv, setCvv] = useState('');
+  const [paying, setPaying] = useState(false);
 
   const submitPayment = () => {
-    void onFinalize({
-      cardholderName,
-      cardNumber,
-      expiry,
-      cvv,
-    });
+    if (paying) return;
+    setPaying(true);
+    void onFinalize().finally(() => setPaying(false));
   };
 
   return (
@@ -2797,74 +2789,24 @@ const CheckoutPage = ({
               <div className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center text-xs font-bold">02</div>
               <h2 className="font-headline text-3xl text-primary italic">Secure Payment</h2>
             </div>
-            <div className="space-y-4">
-              <div className="p-6 rounded-xl border border-primary bg-white flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-5 h-5 rounded-full border-4 border-primary" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-bold text-primary">CREDIT OR DEBIT CARD</p>
-                    <p className="text-[10px] text-on-surface-variant">Visa, Mastercard, American Express</p>
-                  </div>
+            <div className="p-6 rounded-xl border border-primary bg-white flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-5 h-5 rounded-full border-4 border-primary" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-primary">RAZORPAY SECURE CHECKOUT</p>
+                  <p className="text-[10px] text-on-surface-variant">Cards, UPI, net banking &amp; wallets</p>
                 </div>
-                <LayoutGrid className="w-5 h-5 text-on-surface-variant" />
               </div>
-              <div className="p-6 rounded-xl border border-outline-variant/30 bg-surface-container-low flex items-center justify-between opacity-50">
-                <div className="flex items-center gap-4">
-                  <div className="w-5 h-5 rounded-full border-2 border-outline-variant" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-bold text-on-surface-variant">PAYPAL</p>
-                    <p className="text-[10px] text-on-surface-variant">Direct wallet transfer</p>
-                  </div>
-                </div>
-                <LayoutGrid className="w-5 h-5 text-on-surface-variant" />
-              </div>
+              <LayoutGrid className="w-5 h-5 text-on-surface-variant" />
             </div>
-            <div className="bg-surface-container-low p-8 rounded-xl space-y-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Cardholder Name</label>
-                <input
-                  type="text"
-                  value={cardholderName}
-                  onChange={(e) => setCardholderName(e.target.value)}
-                  placeholder="Name on card"
-                  className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Card Number</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={cardNumber}
-                    onChange={(e) => setCardNumber(e.target.value)}
-                    placeholder="0000 0000 0000 0000"
-                    className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                  />
-                  <User className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Expiry Date</label>
-                  <input
-                    type="text"
-                    value={expiry}
-                    onChange={(e) => setExpiry(e.target.value)}
-                    placeholder="MM / YY"
-                    className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">CVV</label>
-                  <input
-                    type="text"
-                    value={cvv}
-                    onChange={(e) => setCvv(e.target.value)}
-                    placeholder="123"
-                    className="w-full bg-white border-none rounded-lg px-4 py-3 text-sm outline-none"
-                  />
-                </div>
-              </div>
+            <div className="bg-surface-container-low p-8 rounded-xl space-y-3">
+              <p className="text-sm text-on-surface">
+                Payments are processed by Razorpay. When you continue, a secure Razorpay window opens to
+                collect your card or UPI details &mdash; they never touch our servers.
+              </p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+                Test mode card: 4111 1111 1111 1111 &middot; any future expiry &middot; any CVV
+              </p>
             </div>
           </section>
         </div>
@@ -2900,8 +2842,8 @@ const CheckoutPage = ({
                 <span className="font-headline text-5xl text-primary italic">{subtotalLabel}</span>
               </div>
             </div>
-            <button type="button" className="w-full primary-gradient text-on-primary py-5 rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl active:scale-[0.98] transition-transform" onClick={submitPayment}>
-              FINALIZE & DOWNLOAD
+            <button type="button" disabled={paying} className="w-full primary-gradient text-on-primary py-5 rounded-xl font-bold uppercase tracking-widest text-xs shadow-xl active:scale-[0.98] transition-transform disabled:opacity-60 disabled:cursor-not-allowed" onClick={submitPayment}>
+              {paying ? 'OPENING RAZORPAY\u2026' : 'PAY SECURELY WITH RAZORPAY'}
             </button>
             {invoice ? (
               <div className="bg-white rounded-xl border border-outline-variant/20 p-5 space-y-2">
@@ -4781,54 +4723,136 @@ export default function App() {
     })();
   };
 
-  const handleFinalizeCheckout = async (payment: {
-    cardholderName: string;
-    cardNumber: string;
-    expiry: string;
-    cvv: string;
-  }) => {
+  const handleFinalizeCheckout = async () => {
     setCheckoutErr('');
-    const numberDigits = payment.cardNumber.replace(/\D+/g, '');
-    if (!payment.cardholderName.trim() || numberDigits.length < 12 || !payment.expiry.trim() || payment.cvv.trim().length < 3) {
-      setCheckoutErr('Enter valid debit/credit card details to continue.');
+
+    // Razorpay test keys are charged in INR; treat the numeric cart total as rupees.
+    const amountPaise = Math.round(checkoutSubtotalNum * 100);
+    if (!Number.isFinite(amountPaise) || amountPaise < 100) {
+      setCheckoutErr('Your cart total is too low to start a payment.');
       return;
     }
 
     try {
-      const result = (await postCheckout({
-        gateway: 'demo',
-        paymentMethod: 'card',
-        currency: 'USD',
-      })) as {
-        order?: { orderId?: string; totalAmount?: number | string; items?: Array<{ totalPrice?: number | string }> };
-        payment?: { paymentId?: string; amount?: number | string };
-      };
-
-      const orderId = String(result?.order?.orderId ?? '').trim() || `ORD-${Date.now()}`;
-      const lineItems = Array.isArray(result?.order?.items) ? result.order.items : [];
-      const lineItemTotal = lineItems.reduce((sum, item) => sum + Number(item.totalPrice ?? 0), 0);
-      const backendTotalRaw = result?.order?.totalAmount ?? result?.payment?.amount;
-      const backendTotal = typeof backendTotalRaw === 'number' ? backendTotalRaw : Number(backendTotalRaw ?? 0);
-      const totalAmount = Number.isFinite(lineItemTotal) && lineItemTotal > 0 ? lineItemTotal : backendTotal;
-      const last4 = numberDigits.slice(-4);
-
-      setLatestInvoice({
-        invoiceNumber: `INV-${Date.now()}`,
-        orderId,
-        amountLabel: formatMoney(Number.isFinite(totalAmount) ? totalAmount : 0),
-        dateLabel: new Date().toLocaleString(),
-        paymentLabel: `Card ending ${last4 || 'XXXX'}`,
-      });
-
-      libState.refetch();
-      adminOrdersState.refetch();
-      window.dispatchEvent(new CustomEvent(ORDER_ACTIVITY_EVENT));
-      setLibraryActionMsg('Checkout successful. Purchased books are now in your private library.');
-      setPage('personal-library');
-      cartState.refetch();
-    } catch (e) {
-      setCheckoutErr(e instanceof Error ? e.message : 'Checkout failed.');
+      await loadRazorpayCheckoutScript();
+    } catch {
+      setCheckoutErr('Unable to load the payment gateway. Check your connection and retry.');
+      return;
     }
+    if (typeof window === 'undefined' || !window.Razorpay) {
+      setCheckoutErr('Unable to load the payment gateway. Please retry.');
+      return;
+    }
+
+    let rzpOrder: { order_id: string; amount: number; currency: string; key_id: string };
+    try {
+      rzpOrder = await postRazorpayCreateOrder({
+        amountPaise,
+        currency: 'INR',
+        receipt: `rcpt_${Date.now()}`,
+        customerEmail: user?.email,
+      });
+    } catch (e) {
+      setCheckoutErr(e instanceof Error ? e.message : 'Could not start the payment.');
+      return;
+    }
+
+    const customerName = [user?.firstName, user?.lastName]
+      .filter((part) => Boolean(part && part.trim()))
+      .join(' ')
+      .trim();
+
+    const completePurchase = async (response: {
+      razorpay_payment_id: string;
+      razorpay_order_id: string;
+      razorpay_signature: string;
+    }) => {
+      try {
+        // Convert the cart into an internal order only after the payment succeeds,
+        // so a cancelled payment never empties the cart.
+        const checkoutResult = (await postCheckout({
+          gateway: 'razorpay',
+          paymentMethod: 'card',
+          currency: 'INR',
+        })) as {
+          order?: { orderId?: string; totalAmount?: number | string; items?: Array<{ totalPrice?: number | string }> };
+          payment?: { amount?: number | string };
+        };
+
+        const internalOrderId = String(checkoutResult?.order?.orderId ?? '').trim();
+        if (!internalOrderId) {
+          setCheckoutErr(
+            `Payment succeeded but the order could not be created. Keep this payment id for support: ${response.razorpay_payment_id}`
+          );
+          return;
+        }
+
+        // Verify the signature server-side, then unlock the purchased books.
+        await postRazorpayVerifyPayment({
+          razorpay_order_id: response.razorpay_order_id,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_signature: response.razorpay_signature,
+          internalOrderId,
+        });
+
+        const lineItems = Array.isArray(checkoutResult?.order?.items) ? checkoutResult.order!.items! : [];
+        const lineItemTotal = lineItems.reduce((sum, item) => sum + Number(item.totalPrice ?? 0), 0);
+        const backendTotalRaw = checkoutResult?.order?.totalAmount ?? checkoutResult?.payment?.amount;
+        const backendTotal = typeof backendTotalRaw === 'number' ? backendTotalRaw : Number(backendTotalRaw ?? 0);
+        const totalAmount = Number.isFinite(lineItemTotal) && lineItemTotal > 0 ? lineItemTotal : backendTotal;
+
+        setLatestInvoice({
+          invoiceNumber: `INV-${Date.now()}`,
+          orderId: internalOrderId,
+          amountLabel: formatMoney(Number.isFinite(totalAmount) ? totalAmount : 0),
+          dateLabel: new Date().toLocaleString(),
+          paymentLabel: `Razorpay \u2022 ${response.razorpay_payment_id}`,
+        });
+
+        libState.refetch();
+        adminOrdersState.refetch();
+        window.dispatchEvent(new CustomEvent(ORDER_ACTIVITY_EVENT));
+        setLibraryActionMsg('Payment successful. Purchased books are now in your private library.');
+        setPage('personal-library');
+        cartState.refetch();
+      } catch (e) {
+        setCheckoutErr(
+          e instanceof Error
+            ? e.message
+            : 'We could not confirm your payment. If you were charged, contact support.'
+        );
+      }
+    };
+
+    const rzp = new window.Razorpay({
+      key: rzpOrder.key_id,
+      amount: rzpOrder.amount,
+      currency: rzpOrder.currency,
+      name: 'Masuki Books',
+      description: 'Digital library purchase',
+      order_id: rzpOrder.order_id,
+      prefill: {
+        name: customerName || undefined,
+        email: user?.email || undefined,
+      },
+      theme: { color: '#6750A4' },
+      modal: {
+        ondismiss: () => setCheckoutErr('Payment was cancelled before completion.'),
+      },
+      handler: (response: {
+        razorpay_payment_id: string;
+        razorpay_order_id: string;
+        razorpay_signature: string;
+      }) => {
+        void completePurchase(response);
+      },
+    });
+
+    rzp.on('payment.failed', (resp: { error?: { description?: string } }) => {
+      setCheckoutErr(resp?.error?.description || 'Payment failed. Please try again.');
+    });
+
+    rzp.open();
   };
 
   const handleDownloadInvoice = () => {
@@ -4853,12 +4877,37 @@ export default function App() {
   };
 
   const handlePublicPurchaseRequired = (book: Book) => {
-    if ((user?.role ?? '').toUpperCase() === 'ADMIN') {
-      setPublicActionMsg('Admin accounts cannot purchase titles from the public library.');
-      return;
-    }
-    const title = book.title || 'This title';
-    setPublicActionMsg(`${title} requires purchase before viewing. Add it to cart and complete checkout.`);
+    setPublicActionMsg('');
+    void (async () => {
+      if (!user) {
+        setPublicActionMsg('Sign in to purchase books.');
+        navigateToPage('login');
+        return;
+      }
+      if ((user.role ?? '').toUpperCase() === 'ADMIN') {
+        setPublicActionMsg('Admin accounts cannot purchase titles from the public library.');
+        return;
+      }
+      const productId = book.productId || book.id;
+      if (!productId) {
+        setPublicActionMsg('This title is not available for purchase yet.');
+        return;
+      }
+      try {
+        const isAlreadyInCart = (cartState.data?.items || []).some(
+          (item) => item.productId === productId
+        );
+        if (!isAlreadyInCart) {
+          await addCartItem(productId, 1);
+          // Let the cart state settle before navigating.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        cartState.refetch();
+        navigateToPage('cart');
+      } catch (e) {
+        setPublicActionMsg(e instanceof Error ? e.message : 'Unable to start the purchase.');
+      }
+    })();
   };
 
   const handleAdminCreateBook = () => {

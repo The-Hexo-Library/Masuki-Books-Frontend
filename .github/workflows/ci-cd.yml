@@ -1,0 +1,165 @@
+name: CI/CD
+
+# ---------------------------------------------------------------------------
+# What this pipeline does
+#   1. backend      – build + run tests + package the Spring Boot jar (JDK 21).
+#   2. frontend     – install, type-check, run Vitest tests, and build (Vite).
+#   3. docker-build – build the backend container image from backend/Dockerfile,
+#                     exactly the way Render builds it (validation only, no push).
+#   4. deploy       – only on a push to the default branch, AFTER all jobs pass,
+#                     trigger a Render deploy via Deploy Hook URLs.
+#
+# One-time setup (GitHub → repo → Settings → Secrets and variables → Actions):
+#   Secrets (required for deploy):
+#     RENDER_BACKEND_DEPLOY_HOOK   – Render → backend service → Settings → Deploy Hook
+#     RENDER_FRONTEND_DEPLOY_HOOK  – (optional) Render → static site → Settings → Deploy Hook
+#   Variables (optional):
+#     VITE_API_URL                 – backend URL baked into the frontend build
+#                                    (defaults to the Render backend if unset)
+#
+# IMPORTANT: In each Render service, turn OFF "Auto-Deploy" so deploys only
+# happen through this pipeline (otherwise Render also deploys on every push).
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+# Stop wasting minutes: cancel an in-progress run when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- backend
+  backend:
+    name: Backend · build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build, test & package
+        run: mvn -B -ntp clean verify
+
+      - name: Upload backend jar
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/*.jar
+          if-no-files-found: warn
+          retention-days: 7
+
+  # --------------------------------------------------------------- frontend
+  frontend:
+    name: Frontend · build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: the-editorial-sanctuary
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: the-editorial-sanctuary/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Unit tests (Vitest)
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+        env:
+          # Falls back to the in-code default (Render backend) when the variable is unset.
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      - name: Upload frontend build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: the-editorial-sanctuary/dist
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ----------------------------------------------------- backend Docker image
+  docker-build:
+    name: Backend · Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Builds the same image Render builds from backend/Dockerfile.
+      # push: false → only proves the image builds; Render still does the real build & deploy.
+      - name: Build backend image (validation only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          tags: masukibooks-backend:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ----------------------------------------------------------------- deploy
+  deploy:
+    name: Deploy to Render
+    needs: [backend, frontend, docker-build]
+    # Only deploy real pushes to the default branch — never on pull requests.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render backend deploy
+        env:
+          HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::RENDER_BACKEND_DEPLOY_HOOK secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "Triggering Render backend deploy…"
+          curl -fsS -X POST "$HOOK"
+          echo "✅ Backend deploy triggered on Render."
+
+      - name: Trigger Render frontend deploy (optional)
+        env:
+          HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "ℹ️  RENDER_FRONTEND_DEPLOY_HOOK not set — skipping frontend deploy."
+            exit 0
+          fi
+          echo "Triggering Render frontend deploy…"
+          curl -fsS -X POST "$HOOK"
+          echo "✅ Frontend deploy triggered on Render."
